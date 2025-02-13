@@ -330,7 +330,7 @@ def render_rays_coarseTofine(net_coarse,net_fine, rays, bound, N_samples, device
     return rgb_map, depth_map, acc_map
 
 # 训练NeRF
-def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, params:NeRFParams, device, epochs=100, save_path='tiny_nerf.pth'):
+def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, params:NeRFParams, device, epochs=100,epoch_val=1, save_path='tiny_nerf.pth'):
     net_coarse = NeRF(input_ch=63,use_view_dirs=params.use_view).to(device)
     torch.manual_seed(0)#这里必须再刷新一次种子，否则第二个模型的梯度不会更新
     net_fine = NeRF(input_ch=63,use_view_dirs=params.use_view).to(device)
@@ -377,6 +377,7 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
         n_val = params.n_val
         net_coarse.eval()
         net_fine.eval()
+        val_save_path = f'validation_result'
         with torch.no_grad():
             rgb_list = []  # 存储所有批次的RGB结果
             avg_loss = 0.0
@@ -388,7 +389,7 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
                     avg_loss += loss.item()
                     rgb_list.append(rgb)
                     p_bar.update(1)
-      
+    
                 avg_loss /= len(validationDataloader)
                 avglosstensor = torch.tensor(avg_loss,dtype=torch.float32)
                 print(f"Validation Loss: {avg_loss:.4f}")
@@ -396,19 +397,19 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
                 avg_psnr = -10. * torch.log(avglosstensor) / torch.log(torch.tensor([10.]))
                 print(f"Validation PSNR: {avg_psnr.item():.4f}")
 
-                if((epoch+1) % 1 == 0):
+                if((epoch+1) % epoch_val == 0):
                     # 保存验证集的渲染结果，将rgb_list保存为n_val个图片
                     rgb_pred = torch.cat(rgb_list, dim=0)
                     rgb_pred = rgb_pred.reshape(-1, H, W, 3).cpu().detach().numpy()
                     rgb_pred = (255 * np.clip(rgb_pred, 0, 1)).astype(np.uint8)
-                    val_save_path = f'validation_result'
+                
                     if not os.path.exists(val_save_path):
                         os.makedirs(val_save_path)
                     for i, rgb in enumerate(rgb_pred):
                         plt.imsave(f'{val_save_path}/validation_image_epoch_{epoch+1}_{i}.png', rgb)
                             # 写入PSNR和epoch还有loss到txt文件
-                    with open(val_save_path+'/psnr_loss.txt', 'a') as f:
-                        f.write(f"Epoch {epoch+1} PSNR: {avg_psnr.item()} Loss: {avg_loss}\n")
+                with open(val_save_path+'/psnr_loss.txt', 'a') as f:
+                    f.write(f"Epoch {epoch+1} PSNR: {avg_psnr.item()} Loss: {avg_loss}\n")
 
     # 保存训练好的模型
     save_coarse_path = save_path.replace('.pth', '_coarse.pth')
@@ -576,18 +577,21 @@ if __name__ == '__main__':
         num_poses = 120      # 每隔3度一个位姿，共120个位姿
         new_poses = generate_circular_poses(radius, elevation, num_poses)
 
-        data_path = 'tiny_nerf_data.npz'
-        if not os.path.exists(data_path):
-            print(f"数据文件 {data_path} 未找到。")
+        basedir = './hotdog'
+        if not os.path.exists(basedir):
+            print(f"数据文件 {basedir} 未找到。")
             raise FileNotFoundError
-        trainDataset = NeRFDataset(data_path, start_idx=0,n_train=params.n_train,transform=None,device=device)
-        params.focal = trainDataset.focal
+        trainDataset = NeRFDatasetUnified(basedir=basedir, dataset_type='blender', split='train', half_res=False,
+                testskip=1, device='cpu')
+        params.focal = trainDataset.hwf[2]
         print(f"已加载NeRF数据: focal={params.focal}, H={params.H}, W={params.W}")
         # 使用训练好的模型进行渲染并创建视频
         render_and_create_video(net_coarse, net_fine,new_poses, params=params, device=device, video_path='rendered_video_1.mp4',image_path='./test_images')
     else:
+        # basedir = os.path.join(os.path.dirname(__file__),
+        #                 '../dataset/nerf_synthetic-20230812T151944Z-001/nerf_synthetic/lego')
         basedir = os.path.join(os.path.dirname(__file__),
-                        '../dataset/nerf_synthetic-20230812T151944Z-001/nerf_synthetic/lego')
+                        './hotdog')
         if not os.path.exists(basedir):
             print(f"数据文件 {basedir} 未找到。")
             raise FileNotFoundError
@@ -597,8 +601,9 @@ if __name__ == '__main__':
         # dataloader的num_workers如果要>0，必须在main函数中调用，此外Dataset的device必须在cpu上
         trainDataloader = DataLoader(trainDataset, batch_size=params.batch_size, shuffle=True,num_workers=4)
         # 验证集的dataloader一定不能shuffle，因为我们需要按顺序渲染图片
+        # testskip设置为10，每隔10张选一张不用都渲染
         validationDataset = NeRFDatasetUnified(basedir=basedir, dataset_type='blender', split='val', half_res=False,
-                testskip=1, device='cpu')
+                testskip=10, device='cpu')
         validationDataloader = DataLoader(validationDataset, batch_size=params.batch_size, shuffle=False)
 
         images,poses,focal,H,W = trainDataset.imgs,trainDataset.poses,trainDataset.hwf[2],trainDataset.hwf[0],trainDataset.hwf[1]
