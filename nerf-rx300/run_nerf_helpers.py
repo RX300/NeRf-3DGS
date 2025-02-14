@@ -218,6 +218,7 @@ def get_rays_np(H, W, K, c2w):
     return rays_o, rays_d
 
 
+# 用于把rays_o和rays_d转换到NDC坐标系
 def ndc_rays(H, W, focal, near, rays_o, rays_d):
     # Shift ray origins to near plane
     t = -(near + rays_o[..., 2]) / rays_d[..., 2]
