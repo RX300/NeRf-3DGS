@@ -94,7 +94,7 @@ class NeRFDatasetUnified(Dataset):
             raise ValueError(f"Unknown dataset type: {dataset_type}")
 
         H, W, focal = self.hwf
-
+        self.render_poses = render_poses
         # 对所有图像预计算每张图片所有像素点的光线及对应 RGB
         all_rays = []
         all_rgbs = []

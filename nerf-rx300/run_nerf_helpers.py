@@ -219,26 +219,27 @@ def get_rays_np(H, W, K, c2w):
 
 
 # 用于把rays_o和rays_d转换到NDC坐标系
+# nerf的ndc对应opengl空间，xyz轴都在-1到1之间，z轴是从近到远的,所以z轴从-1开始
+# 另外nerf的ndc只在远景空间使用，也就是far认为无穷远，下面的代码就默认按照far无穷远的公式进行计算的
 def ndc_rays(H, W, focal, near, rays_o, rays_d):
     # Shift ray origins to near plane
-    t = -(near + rays_o[..., 2]) / rays_d[..., 2]
-    rays_o = rays_o + t[..., None] * rays_d
-
+    t = -(near + rays_o[...,2]) / rays_d[...,2]
+    rays_o = rays_o + t[...,None] * rays_d
+    
     # Projection
-    o0 = -1./(W/(2.*focal)) * rays_o[..., 0] / rays_o[..., 2]
-    o1 = -1./(H/(2.*focal)) * rays_o[..., 1] / rays_o[..., 2]
-    o2 = 1. + 2. * near / rays_o[..., 2]
+    o0 = -1./(W/(2.*focal)) * rays_o[...,0] / rays_o[...,2]
+    o1 = -1./(H/(2.*focal)) * rays_o[...,1] / rays_o[...,2]
+    o2 = 1. + 2. * near / rays_o[...,2]
 
-    d0 = -1./(W/(2.*focal)) * \
-        (rays_d[..., 0]/rays_d[..., 2] - rays_o[..., 0]/rays_o[..., 2])
-    d1 = -1./(H/(2.*focal)) * \
-        (rays_d[..., 1]/rays_d[..., 2] - rays_o[..., 1]/rays_o[..., 2])
-    d2 = -2. * near / rays_o[..., 2]
-
-    rays_o = torch.stack([o0, o1, o2], -1)
-    rays_d = torch.stack([d0, d1, d2], -1)
-
+    d0 = -1./(W/(2.*focal)) * (rays_d[...,0]/rays_d[...,2] - rays_o[...,0]/rays_o[...,2])
+    d1 = -1./(H/(2.*focal)) * (rays_d[...,1]/rays_d[...,2] - rays_o[...,1]/rays_o[...,2])
+    d2 = -2. * near / rays_o[...,2]
+    
+    rays_o = torch.stack([o0,o1,o2], -1)
+    rays_d = torch.stack([d0,d1,d2], -1)
+    
     return rays_o, rays_d
+
 
 
 # Hierarchical sampling (section 5.2)

@@ -308,7 +308,7 @@ def get_rgb_w(net, pts, rays_d, z_vals, device, noise_std=.0, use_view=False):
     return rgb, weights
 
 # 渲染光线
-def render_rays_coarseTofine(net_coarse,net_fine, rays, bound, N_samples, device, noise_std=.0,use_view=False,use_hierarchy=False):
+def render_rays_coarseTofine(net_coarse,net_fine, rays, bound,focal,hw, N_samples, device, noise_std=.0,use_view=False,use_hierarchy=False,use_ndc=False):
     '''
     Render rays from coarse to fine
     :param net_coarse: Coarse network
@@ -321,7 +321,13 @@ def render_rays_coarseTofine(net_coarse,net_fine, rays, bound, N_samples, device
     bs = rays_o.shape[0]
     near, far = bound
     uniform_N, important_N = N_samples
-    z_vals = uniform_sample_point(near, far, uniform_N, device)
+    if use_ndc:
+        H, W = hw
+        # nerf的ndc对应opengl空间，xyz轴都在-1到1之间，z轴是从近到远的,所以z轴从-1开始
+        z_vals = uniform_sample_point(-1., 1., uniform_N, device)
+        rays_o, rays_d = ndc_rays(H, W, focal, near, rays_o, rays_d)
+    else:
+        z_vals = uniform_sample_point(near, far, uniform_N, device)
     # z_vals => tensor(uniform_N)
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., None]
     # rays_o[..., None, :].shape => torch.Size([Batch_Size, 1, 3]),None是为了增加一个维度
@@ -367,6 +373,13 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
     
     iterations = len(trainDataloader)
     device = params.device
+    use_ndc = params.use_ndc
+    use_hierarchy = params.use_hierarchy
+    use_view = params.use_view
+    N_samples = params.N_samples
+    focal = params.focal
+    bound = params.bound
+    hw = [params.H, params.W]
     for epoch in range(epochs):
         net_coarse.train()
         net_fine.train()
@@ -375,12 +388,11 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
             for batch in trainDataloader:
                 batch = [b.to(device) for b in batch]
                 batch_rays_o, batch_rays_d, batch_target_rgb = batch
-                if params.use_ndc:
-                    batch_rays_o, batch_rays_d = ndc_rays(params.H, params.W, params.focal, params.bound[0], batch_rays_o, batch_rays_d)
+                rays_od = [batch_rays_o, batch_rays_d]
                 optimizer.zero_grad()
                 # 渲染光线
-                rgb_coarse, _, _ = render_rays_coarseTofine(net_coarse,net_fine, (batch_rays_o, batch_rays_d), bound=params.bound, N_samples=params.N_samples, device=device, use_view=params.use_view,use_hierarchy=params.use_hierarchy)
-                rgb_fine, depth_pred, acc_pred = render_rays_coarseTofine(net_coarse,net_fine, (batch_rays_o, batch_rays_d), bound=params.bound, N_samples=params.N_samples, device=device, use_view=params.use_view,use_hierarchy=params.use_hierarchy)
+                rgb_coarse, _, _ = render_rays_coarseTofine(net_coarse,net_fine, rays_od, bound,focal,hw, N_samples=N_samples, device=device, use_view=use_view,use_hierarchy=use_hierarchy,use_ndc=use_ndc)
+                rgb_fine, _, _ = render_rays_coarseTofine(net_coarse,net_fine, rays_od, bound,focal,hw, N_samples=N_samples, device=device, use_view=use_view,use_hierarchy=use_hierarchy,use_ndc=use_ndc)
                 # 计算损失
                 loss_coarse = mse(rgb_coarse, batch_target_rgb)
                 loss_fine = mse(rgb_fine, batch_target_rgb)
@@ -410,9 +422,7 @@ def train_nerf(trainDataloader:DataLoader, validationDataloader:DataLoader, para
                 for batch in validationDataloader:
                     batch = [b.to(device) for b in batch]
                     batch_rays_o, batch_rays_d, batch_target_rgb = batch
-                    if params.use_ndc:
-                        batch_rays_o, batch_rays_d = ndc_rays(params.H, params.W, params.focal, params.bound[0], batch_rays_o, batch_rays_d)
-                    rgb, _, _ = render_rays_coarseTofine(net_coarse,net_fine, (batch_rays_o, batch_rays_d), bound=params.bound, N_samples=params.N_samples, device=device, use_view=params.use_view,use_hierarchy=params.use_hierarchy)
+                    rgb, _, _ = render_rays_coarseTofine(net_coarse,net_fine, (batch_rays_o, batch_rays_d), bound, focal,hw,N_samples=N_samples, device=device, use_view=use_view,use_hierarchy=use_hierarchy,use_ndc=use_ndc)
                     loss = mse(rgb, batch_target_rgb)
                     avg_loss += loss.item()
                     rgb_list.append(rgb)
@@ -453,8 +463,11 @@ def render_and_create_video(net_coarse:NeRF,net_fine:NeRF, poses, params:NeRFPar
     net_coarse.eval()
     net_fine.eval()
     bound = params.bound
+    hw = [params.H, params.W]
     N_samples = params.N_samples
     use_view = params.use_view
+    use_hierarchy = params.use_hierarchy
+    use_ndc = params.use_ndc
     # 假设 H, W, focal 已保存于 params 中
     H, W, focal = params.H, params.W, params.focal
 
@@ -466,8 +479,6 @@ def render_and_create_video(net_coarse:NeRF,net_fine:NeRF, poses, params:NeRFPar
             rays_o, rays_d = sample_rays_np(H, W, focal, pose[:3, :4])
             rays_o = torch.reshape(torch.tensor(rays_o, device=device, dtype=torch.float32), [-1, 3])
             rays_d = torch.reshape(torch.tensor(rays_d, device=device, dtype=torch.float32), [-1, 3])
-            if params.use_ndc:
-                    batch_rays_o, batch_rays_d = ndc_rays(params.H, params.W, params.focal, params.bound[0], batch_rays_o, batch_rays_d)
             # 分成多个batch进行渲染
             batch_size = 4096
             num_batches = (rays_o.shape[0] + batch_size - 1) // batch_size
@@ -479,7 +490,7 @@ def render_and_create_video(net_coarse:NeRF,net_fine:NeRF, poses, params:NeRFPar
                 batch_rays_d = rays_d[start:end]
                 rays_od = (batch_rays_o, batch_rays_d)
                 # 调用 coarse-to-fine 渲染函数
-                rgb_batch, _, _ = render_rays_coarseTofine(net_coarse, net_fine, rays_od, bound=bound, N_samples=N_samples, device=device, use_view=use_view, use_hierarchy=True)
+                rgb_batch, _, _ = render_rays_coarseTofine(net_coarse, net_fine, rays_od, bound,focal,hw,N_samples=N_samples, device=device, use_view=use_view, use_hierarchy=use_hierarchy, use_ndc=use_ndc)
                 rgb_batches.append(rgb_batch)
             
             # 拼接所有batch的结果
@@ -531,7 +542,6 @@ rot_theta = lambda th : np.array([
     [0,0,0,1],
 ], dtype=float)
 
-
 def pose_spherical(theta, phi, radius):
     c2w = trans_t(radius)
     c2w = rot_phi(phi/180.*np.pi) @ c2w
@@ -579,8 +589,8 @@ if __name__ == '__main__':
     # 创建参数实例
     params = NeRFParams()
     params.only_render = False
-    params.nerf_coarse_path = 'tiny_nerf_coarse.pth'
-    params.nerf_fine_path = 'tiny_nerf_fine.pth'
+    params.nerf_coarse_path = 'hotdog_nerf_coarse.pth'
+    params.nerf_fine_path = 'hotdog_nerf_fine.pth'
     params.epochs = 1
     params.batch_size = 512
     params.bound = (2., 6.)
@@ -614,9 +624,13 @@ if __name__ == '__main__':
         trainDataset = NeRFDatasetUnified(basedir=basedir, dataset_type='blender', split='train', half_res=False,
                 testskip=1, device='cpu')
         params.focal = trainDataset.hwf[2]
+        params.H = trainDataset.hwf[0]
+        params.W = trainDataset.hwf[1]
+        render_poses = trainDataset.render_poses
+        np_render_poses = render_poses.cpu().numpy()
         print(f"已加载NeRF数据: focal={params.focal}, H={params.H}, W={params.W}")
         # 使用训练好的模型进行渲染并创建视频
-        render_and_create_video(net_coarse, net_fine,new_poses, params=params, device=device, video_path='rendered_video_1.mp4',image_path='./test_images')
+        render_and_create_video(net_coarse, net_fine,np_render_poses, params=params, device=device, video_path='rendered_video_1.mp4',image_path='./test_images')
     else:
         # basedir = os.path.join(os.path.dirname(__file__),
         #                 '../dataset/nerf_synthetic-20230812T151944Z-001/nerf_synthetic/lego')
@@ -652,7 +666,7 @@ if __name__ == '__main__':
 
         # 生成新的位姿数据，使摄像机绕物体旋转360度，共180个位置
         radius = 4.0        # 根据您的场景调整摄像机距离
-        elevation = 30.0    # 摄像机的仰角
+        elevation = -30.0    # 摄像机的仰角
         # num_poses = 180      # 每隔2度一个位姿，共180个位姿
         num_poses = 60
         new_poses = generate_circular_poses(radius, elevation, num_poses)

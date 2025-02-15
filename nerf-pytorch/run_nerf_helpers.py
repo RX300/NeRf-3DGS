@@ -171,7 +171,8 @@ def get_rays_np(H, W, K, c2w):
     rays_o = np.broadcast_to(c2w[:3,-1], np.shape(rays_d))
     return rays_o, rays_d
 
-
+# nerf的ndc对应opengl空间，xyz轴都在-1到1之间，z轴是从近到远的，所以z轴是负的
+# 另外nerf的ndc只在远景空间使用，也就是far认为无穷远，下面的代码就默认按照far无穷远的公式进行计算的
 def ndc_rays(H, W, focal, near, rays_o, rays_d):
     # Shift ray origins to near plane
     t = -(near + rays_o[...,2]) / rays_d[...,2]

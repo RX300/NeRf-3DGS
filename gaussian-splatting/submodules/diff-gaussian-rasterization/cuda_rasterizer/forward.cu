@@ -111,6 +111,7 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 // Forward method for converting scale and rotation properties of each
 // Gaussian to a 3D covariance matrix in world space. Also takes care
 // of quaternion normalization.
+// 计算世界空间的3D协方差矩阵sigma(sigma就是指协方差矩阵，对应于原论文中的sigma符号)
 __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 rot, float* cov3D)
 {
 	// Create scaling matrix

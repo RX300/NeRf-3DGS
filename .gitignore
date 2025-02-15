@@ -1,3 +1,5 @@
 ﻿dataset/
 colmap-x64-windows-cuda/
 MeshLab/
+#忽略所有.zip文件
+*.zip
