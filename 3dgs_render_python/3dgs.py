@@ -195,12 +195,11 @@ class Rasterizer:
                 pixf = [i, j]
                 C = [0, 0, 0]
 
+                # init helper variables, transmirrance
+                # 原仓库的T放在了下面的循环内的开头，疑似写错了
+                T = 1
                 # loop gaussian
                 for idx in point_list:
-
-                    # init helper variables, transmirrance
-                    T = 1
-
                     # Resample using conic matrix
                     # (cf. "Surface Splatting" by Zwicker et al., 2001)
                     xy = points_xy_image[idx]  # center of 2d gaussian
@@ -282,7 +281,7 @@ if __name__ == "__main__":
         tan_fovy=tanfovy,
         prefiltered=None,
     )
-
+    print(out_color.shape)
     import matplotlib.pyplot as plt
 
     plt.imshow(out_color)

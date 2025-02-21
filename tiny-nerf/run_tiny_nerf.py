@@ -10,7 +10,6 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from IPython.display import HTML
 from base64 import b64encode
 import imageio
 
@@ -541,6 +540,8 @@ if __name__ == '__main__':
     torch.manual_seed(100)
     # 开启加速
     torch.backends.cudnn.benchmark = True
+    #统一设置torch的类型为float32
+    torch.set_default_dtype(torch.float32)
 
     # 创建参数实例
     params = NeRFParams()

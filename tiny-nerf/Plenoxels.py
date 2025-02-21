@@ -86,8 +86,8 @@ class PlenoxelModel(nn.Module):
         grid = pts_norm.view(1, -1, 1, 1, 3)  # [1, N_pts, 1, 1, 3]
         
         features = F.grid_sample(
-            voxel_features,
-            grid,
+            voxel_features.float(),
+            grid.float(),
             align_corners=True,
             mode='bilinear',
             padding_mode='border'

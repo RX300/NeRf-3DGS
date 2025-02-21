@@ -217,6 +217,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float det_cov = cov.x * cov.z - cov.y * cov.y;
 	cov.x += h_var;
 	cov.z += h_var;
+	// cov.x:cov2d[0,0], cov.y:cov2d[0,1], cov.z:cov2d[1,1]
 	const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 	float h_convolution_scaling = 1.0f;
 
@@ -350,6 +351,7 @@ renderCUDA(
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
+			// con_o.x:cov2d_inv[0,0], con_o.y:cov2d_inv[0,1], con_o.z:cov2d_inv[1,1], con_o.w:opacity
 			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			if (power > 0.0f)
 				continue;
