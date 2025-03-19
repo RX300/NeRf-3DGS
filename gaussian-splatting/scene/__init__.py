@@ -45,6 +45,10 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.depths, args.eval)
+        #如果路径下存在任意npz后缀的文件
+        elif len([f for f in os.listdir(args.source_path) if f.endswith(".npz")]) > 0:
+            print("Found npz file, assuming TinyNerf data set!")
+            scene_info = sceneLoadTypeCallbacks["TinyNerf"](args.source_path, args.white_background, args.depths, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 

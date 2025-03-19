@@ -309,7 +309,156 @@ def readNerfSyntheticInfo(path, white_background, depths, eval, extension=".png"
                            is_nerf_synthetic=True)
     return scene_info
 
+def readCamerasFromTinyNerfDataNPZ(path, npzfile, depths_folder, white_background, is_test):
+    """读取 tinyNeRF 格式的 NPZ 文件中的相机参数和图像信息
+
+    Args:
+        path: 数据集根目录路径
+        npzfile: NPZ 文件名
+        depths_folder: 深度图文件夹路径（如果有）
+        white_background: 背景是否为白色
+        is_test: 是否为测试集相机
+
+    Returns:
+        cam_infos: 包含相机信息的列表
+    """
+    cam_infos = []
+
+    # 加载 NPZ 文件
+    npz_path = os.path.join(path, npzfile)
+    data = np.load(npz_path)
+    
+    # 提取相机参数和图像
+    images = data['images']  # [N, H, W, 3/4]
+    poses = data['poses']    # [N, 4, 4]
+    focal = data['focal']    # 焦距，单个浮点数
+    
+    H, W = images.shape[1:3]
+    
+    # 计算相机视场角
+    fovx = focal2fov(focal, W)
+    fovy = focal2fov(focal, H)
+    
+    for idx in range(poses.shape[0]):
+        # NeRF 'poses' 是相机到世界的变换
+        c2w = poses[idx]
+        
+        # 转换坐标系：从 NeRF (Y up, Z back) 到 COLMAP (Y down, Z forward)
+        c2w[:3, 1:3] *= -1
+        
+        # 计算世界到相机的变换矩阵
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3, :3])  # R 存储为转置形式，符合 CUDA 代码中 'glm' 的要求
+        T = w2c[:3, 3]
+        
+        # 创建图像名称
+        if is_test:
+            image_name = f"t_{idx}"
+        else:
+            image_name = f"r_{idx}"
+        # 处理图像
+        if images.shape[-1] == 4:  # RGBA
+            im_data = images[idx]
+            bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
+            norm_data = im_data / 255.0
+            arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
+            image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
+        else:  # RGB
+            image = Image.fromarray(np.array(images[idx]*255.0, dtype=np.byte), "RGB")
+        # 保存图像到文件
+        image_dir = os.path.join(path, "images")
+        os.makedirs(image_dir, exist_ok=True)
+        image_path = os.path.join(image_dir, f"{image_name}.png")
+        image.save(image_path)
+        
+        # 检查是否存在深度图
+        depth_path = os.path.join(depths_folder, f"{image_name}.png") if depths_folder != "" else ""
+        
+        # 创建并添加相机信息
+        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, 
+            FovY=fovy, FovX=fovx,
+            image_path=image_path, image_name=image_name,
+            width=W, height=H, 
+            depth_path=depth_path, depth_params=None, 
+            is_test=is_test
+        ))
+    
+    return cam_infos
+
+def readTinyNerfSyntheticInfo(path, white_background, depths, eval, extension=".png"):
+
+    """读取 tinyNeRF 格式的合成数据集信息
+
+    Args:
+        path: 数据集根目录路径
+        white_background: 背景是否为白色
+        depths: 深度图文件夹名称
+        eval: 是否为评估模式
+        extension: 图像文件扩展名
+
+    Returns:
+        scene_info: 包含场景信息的 SceneInfo 对象
+    """
+    depths_folder = os.path.join(path, depths) if depths != "" else ""
+    
+    # 加载数据集
+    print("Reading tinyNeRF Data NPZ")
+    npz_file = "tiny_nerf_data.npz"
+    
+    # 在tinyNeRF中，我们不区分训练和测试集，而是根据eval参数决定如何划分
+    all_cam_infos = readCamerasFromTinyNerfDataNPZ(path, npz_file, depths_folder, white_background, False)
+    
+    # 如果是评估模式，则按照惯例每8张取一张作为测试集
+    if eval:
+        print("Splitting into train/test sets (every 8th camera is test)")
+        test_indices = range(0, len(all_cam_infos), 8)
+        test_cam_infos = [all_cam_infos[i] for i in test_indices]
+        train_cam_infos = [all_cam_infos[i] for i in range(len(all_cam_infos)) if i not in test_indices]
+        
+        # 更新测试集相机的is_test标志
+        for cam in test_cam_infos:
+            cam = cam._replace(is_test=True)
+    else:
+        # 如果不是评估模式，所有相机都用于训练
+        train_cam_infos = all_cam_infos
+        test_cam_infos = []
+    
+    # 计算 NeRF 归一化参数
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    
+    # 处理点云
+    ply_path = os.path.join(path, "points3d.ply")
+    if not os.path.exists(ply_path):
+        # tinyNeRF 格式没有预先生成的点云，所以我们创建一个随机点云
+        num_pts = 100_000
+        print(f"Generating random point cloud ({num_pts})...")
+        
+        # 我们在合成场景的范围内创建随机点，范围与Blender场景相似
+        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+        shs = np.random.random((num_pts, 3)) / 255.0
+        
+        # 保存点云到PLY文件
+        storePly(ply_path, xyz, SH2RGB(shs) * 255)
+    
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+    
+    # 创建场景信息
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_cam_infos,
+        test_cameras=test_cam_infos,
+        nerf_normalization=nerf_normalization,
+        ply_path=ply_path,
+        is_nerf_synthetic=True
+    )
+    
+    return scene_info
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "TinyNerf": readTinyNerfSyntheticInfo
 }

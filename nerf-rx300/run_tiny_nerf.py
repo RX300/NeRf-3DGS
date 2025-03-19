@@ -10,8 +10,6 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from IPython.display import HTML
-from base64 import b64encode
 import imageio
 from NeRFDataset import NeRFDatasetUnified
 

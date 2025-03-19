@@ -48,7 +48,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         debug=pipe.debug,
         antialiasing=pipe.antialiasing
     )
-
+    #print(f"sh_degree:{pc.max_sh_degree}")
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
     means3D = pc.get_xyz
@@ -108,8 +108,37 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             scales = scales,
             rotations = rotations,
             cov3D_precomp = cov3D_precomp)
-        
-    # Apply exposure to rendered image (training only)
+        #查找means2d中是否有大于0.5的值
+        if torch.max(means2D)>0.5:
+            print(f"means2D中最大值大于0.5")
+        # 查找means3d中是否有nan值
+        if torch.isnan(means3D).any():
+            print(f"means3D中有nan值")
+    # shs.shape=>[num_gaussians,(max_sh_degree+1)**2,3]    
+    #means3D.shape=>[num_gaussians,3]
+    #means2D.shape=>[num_gaussians,3]
+    #shs.shape=>[num_gaussians,(max_sh_degree+1)**2,3]
+    #opacities.shape=>[num_gaussians,1]
+    #scales.shape=>[num_gaussians,3]
+    #rotations.shape=>[num_gaussians,4]
+    #rendered_image.shape=>[C,image_height,image_width]
+    #radii.shape=>[num_gaussians]
+    #depth_image.shape=>[1,image_height,image_width]
+    #bg_color.shape=>[3]
+
+    # print(f"means3D.shape=>{means3D.shape}")
+    # print(f"means2D.shape=>{means2D.shape}")
+    # print(f"shs.shape=>{shs.shape}")
+    # #print(f"colors_precomp.shape=>{colors_precomp.shape}")
+    # print(f"opacities.shape=>{opacity.shape}")
+    # print(f"scales.shape=>{scales.shape}")
+    # print(f"rotations.shape=>{rotations.shape}")
+    # #print(f"cov3D_precomp.shape=>{cov3D_precomp.shape}")
+    # print(f"rendered_image.shape=>{rendered_image.shape}")
+    # print(f"radii.shape=>{radii.shape}")
+    # print(f"depth_image.shape=>{depth_image.shape}")
+    # print(f"bg_color.shape=>{bg_color.shape}")
+    # # Apply exposure to rendered image (training only)
     if use_trained_exp:
         exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
         rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]

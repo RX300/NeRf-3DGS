@@ -1,0 +1,4 @@
+Epoch 50: Loss = 0.101704, PSNR = 9.96
+Epoch 50: Loss = 0.070687, PSNR = 11.54
+Epoch 50: Loss = 0.070688, PSNR = 11.54
+Epoch 100: Loss = 0.070606, PSNR = 11.54
