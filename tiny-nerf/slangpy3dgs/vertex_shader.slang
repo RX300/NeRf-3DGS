@@ -111,9 +111,10 @@ rectangle get_rectangle_tile_space(
 [Differentiable]
 void preprocess_shader(
     // 输入参数
-    no_diff int32_t g_idx,                  // 高斯点索引
-    float3 xyz_ws,                          // 世界空间中高斯点的位置
+    no_diff int32_t g_idx, // 高斯点索引
+    float3 xyz_ws,         // 世界空间中高斯点的位置
     float[48] sh_coeffs,                    // 球谐系数
+    float opacity,                          // 不透明度
     float4 rotations,                       // 旋转四元数
     float3 scales,                          // 缩放系数
     no_diff uint active_sh,                 // 活动的球谐阶数
@@ -285,6 +286,7 @@ void preprocess_shader(
 
     // 存储2D逆协方差矩阵
     out_inv_cov_vs = float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][0], inv_cov_vs[1][1]);
+    p_hom_test = float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][1], opacity*h_convolution_scaling);
     // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 0), inv_cov_vs[0][0]);
     // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 1), inv_cov_vs[0][1]);
     // out_inv_cov_vs.storeOnce(uint3(g_idx, 1, 0), inv_cov_vs[1][0]);

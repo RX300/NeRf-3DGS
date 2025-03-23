@@ -386,6 +386,7 @@ class GaussianSplatting:
             spy.thread_id(),                    # g_idx - 线程ID
             means3D,                            # xyz_ws - 世界空间中高斯点的位置
             shs.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+            opacity.squeeze(),                            # opacities - 不透明度
             rotations,                          # rotations - 旋转四元数
             scales,                             # scales - 缩放系数
             3,                                  # active_sh - 活动的球谐阶数
@@ -418,7 +419,7 @@ class GaussianSplatting:
         # print(f"out_xyz_vs:{out_xyz_vs.mean(dim=0)}")
         print(f"out_pixels_xy:{out_pixels_xy.mean(dim=0)}")
         # print(f"meansHomo:{meansHomo.mean(dim=0)}")
-        # print(f"p_hom_test:{p_hom_test.mean(dim=0)}")
+        print(f"p_hom_test:{p_hom_test.mean(dim=0)}")
         print(f"out_radii:{out_radii.mean()}")
         print(f"out_depths:{out_depths.mean()}")
         print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
