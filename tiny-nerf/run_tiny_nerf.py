@@ -43,6 +43,7 @@ def sample_rays_np(H, W, f, c2w):
     i, j = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32), indexing='xy')
     dirs = np.stack([(i - W * 0.5 + 0.5) / f, -(j - H * 0.5 + 0.5) / f, -np.ones_like(i)], -1)
     rays_d = np.sum(dirs[..., None, :] * c2w[:3, :3], -1)
+    #rays_d = np.matmul(dirs[..., None, :], c2w[:3, :3].T)
     # rays_d => (H, W, 3)
     # c2w[:3,-1]提取了最后一列的前三行元素，也就是相机的位置
     rays_o = np.broadcast_to(c2w[:3,-1], np.shape(rays_d))

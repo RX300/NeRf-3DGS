@@ -151,7 +151,7 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
-	const float* orig_points,
+	const float* orig_points,//means3D
 	const glm::vec3* scales,
 	const float scale_modifier,
 	const glm::vec4* rotations,
@@ -161,13 +161,13 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
 	const float* viewmatrix,
-	const float* projmatrix,
+	const float* projmatrix,//实际上是MVP矩阵
 	const glm::vec3* cam_pos,
 	const int W, int H,
 	const float tan_fovx, float tan_fovy,
 	const float focal_x, float focal_y,
 	int* radii,
-	float2* points_xy_image,
+	float2* points_xy_image,//means2D
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
@@ -175,7 +175,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-	bool antialiasing)
+	bool antialiasing,
+	float4* meansHomo)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -268,6 +269,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	meansHomo[idx] = p_hom;
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -454,7 +456,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-	bool antialiasing)
+	bool antialiasing,
+	float4* meansHomo)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -482,6 +485,6 @@ void FORWARD::preprocess(int P, int D, int M,
 		grid,
 		tiles_touched,
 		prefiltered,
-		antialiasing
-		);
+		antialiasing,
+		meansHomo);
 }

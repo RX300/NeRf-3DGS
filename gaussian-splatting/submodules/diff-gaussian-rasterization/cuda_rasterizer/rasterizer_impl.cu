@@ -166,6 +166,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
 	obtain(chunk, geom.point_offsets, P, 128);
+	obtain(chunk, geom.meansHomo, P*4, 128);
 	return geom;
 }
 
@@ -219,7 +220,10 @@ int CudaRasterizer::Rasterizer::forward(
 	float* depth,
 	bool antialiasing,
 	int* radii,
-	bool debug)
+	bool debug,
+	float* means2D,
+	float* meansHomo,
+	float* conic_opacity)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -272,9 +276,13 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered,
-		antialiasing
+		antialiasing,
+		geomState.meansHomo
 	), debug)
-
+	//用geomState.means2D填充means2D，使用cudaMemcpy
+	CHECK_CUDA(cudaMemcpy(means2D, geomState.means2D, P * 2 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+	CHECK_CUDA(cudaMemcpy(meansHomo, geomState.meansHomo, P * 4 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+	CHECK_CUDA(cudaMemcpy(conic_opacity, geomState.conic_opacity, P * 4 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)

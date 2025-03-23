@@ -32,7 +32,9 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+// std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+torch::Tensor,torch::Tensor,torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -69,7 +71,7 @@ RasterizeGaussiansCUDA(
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor out_invdepth = torch::full({0, H, W}, 0.0, float_opts);
   float* out_invdepthptr = nullptr;
-
+  
   out_invdepth = torch::full({1, H, W}, 0.0, float_opts).contiguous();
   out_invdepthptr = out_invdepth.data<float>();
 
@@ -83,7 +85,11 @@ RasterizeGaussiansCUDA(
   std::function<char*(size_t)> geomFunc = resizeFunctional(geomBuffer);
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
-  
+  // 我自己修改的部分
+  // 创建 means2D 张量来存储2D投影点
+  torch::Tensor means2D = torch::zeros({P, 2}, float_opts);
+  torch::Tensor meansHomo = torch::ones({P, 4}, float_opts);
+  torch::Tensor conic_opacity = torch::zeros({P, 4}, float_opts);
   int rendered = 0;
   if(P != 0)
   {
@@ -118,9 +124,14 @@ RasterizeGaussiansCUDA(
 		out_invdepthptr,
 		antialiasing,
 		radii.contiguous().data<int>(),
-		debug);
+		debug,
+		//添加的参数
+		means2D.contiguous().data<float>(),
+		meansHomo.contiguous().data<float>(),
+		conic_opacity.contiguous().data<float>()
+	  );
   }
-  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth);
+  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth,means2D,meansHomo,conic_opacity);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
