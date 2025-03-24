@@ -34,7 +34,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
 
 // std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-torch::Tensor,torch::Tensor,torch::Tensor>
+torch::Tensor,torch::Tensor,torch::Tensor,torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -67,7 +67,7 @@ RasterizeGaussiansCUDA(
 
   auto int_opts = means3D.options().dtype(torch::kInt32);
   auto float_opts = means3D.options().dtype(torch::kFloat32);
-
+  
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor out_invdepth = torch::full({0, H, W}, 0.0, float_opts);
   float* out_invdepthptr = nullptr;
@@ -90,6 +90,7 @@ RasterizeGaussiansCUDA(
   torch::Tensor means2D = torch::zeros({P, 2}, float_opts);
   torch::Tensor meansHomo = torch::ones({P, 4}, float_opts);
   torch::Tensor conic_opacity = torch::zeros({P, 4}, float_opts);
+  torch::Tensor tiles_touched = torch::zeros({P}, int_opts);
   int rendered = 0;
   if(P != 0)
   {
@@ -128,10 +129,13 @@ RasterizeGaussiansCUDA(
 		//添加的参数
 		means2D.contiguous().data<float>(),
 		meansHomo.contiguous().data<float>(),
-		conic_opacity.contiguous().data<float>()
+		conic_opacity.contiguous().data<float>(),
+		tiles_touched.contiguous().data<int>()
 	  );
+	  //打印出tiles_touched的mean值
+	  std::cout << "cuda:tiles_touched mean: " << tiles_touched.mean(torch::kFloat32).item<float>() << std::endl;
   }
-  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth,means2D,meansHomo,conic_opacity);
+  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth,means2D,meansHomo,conic_opacity,tiles_touched);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

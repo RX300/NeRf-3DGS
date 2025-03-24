@@ -13,6 +13,7 @@ from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
 import slangpy as spy
 import pathlib
+import falcor
 
 # Import the diff_gaussian_rasterization module
 try:
@@ -31,6 +32,12 @@ np.random.seed(42)
 torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
+
+def sort_by_keys_torch(keys, values):
+  """Sorts a values tensor by a corresponding keys tensor."""
+  sorted_keys, idxs = torch.sort(keys)
+  sorted_val = values[idxs]
+  return sorted_keys, sorted_val
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -69,13 +76,6 @@ def storePly(path, xyz, rgb):
     vertex_element = PlyElement.describe(elements, 'vertex')
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
-    
-def getWorld2View(R, t):
-    Rt = np.zeros((4, 4))
-    Rt[:3, :3] = R.transpose()
-    Rt[:3, 3] = t
-    Rt[3, 3] = 1.0
-    return np.float32(Rt)
 
 def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
     Rt = np.zeros((4, 4))
@@ -140,6 +140,7 @@ class GaussianSplatting:
         # Load the module
         self.utilsmodule = spy.TorchModule.load_from_file(sgldevice, "spherical_harmonics.slang")
         self.shadermodule = spy.TorchModule.load_from_file(sgldevice, "vertex_shader.slang")
+        self.tilesmodule = spy.TorchModule.load_from_file(sgldevice, "tiles.slang")
         # Initialize Gaussian parameters
         self.xyz = torch.empty(0)
         self.scales = torch.empty(0)
@@ -163,7 +164,7 @@ class GaussianSplatting:
                 {'params': self.features_rest, 'lr': self.feature_lr/20.0}
             ]
         )
-
+        self.initialize_falcor()
     def load_nerf_data(self, filename):
         """Load data from the tiny_nerf_data.npz file."""
         data = np.load(filename)
@@ -202,8 +203,6 @@ class GaussianSplatting:
             self.pcd = fetchPly(ply_path)
         except:
             self.pcd = None
-        # Create rays for all pixels
-        self.rays_o, self.rays_d = self.get_rays()
     
     def initialize_gaussians(self):
         """Initialize Gaussian parameters."""
@@ -217,81 +216,15 @@ class GaussianSplatting:
         self.opacities = nn.Parameter(data=opacities, requires_grad=True)
         self.features_dc = nn.Parameter(data=torch.zeros(self.num_gaussians, 1, 3, device=device), requires_grad=True)
         self.features_rest = nn.Parameter(data=torch.zeros(self.num_gaussians, (self.sh_degree+1)**2-1, 3, device=device), requires_grad=True)   
-
-    def get_rays(self):
-        """Compute rays for all pixels in all images."""
-        i, j = torch.meshgrid(
-            torch.arange(self.height, device=device),
-            torch.arange(self.width, device=device),
-            indexing='ij'
-        )
-        
-        i = i.flatten()
-        j = j.flatten()
-        
-        # Map pixel coordinates to NDC space
-        dirs = torch.stack([
-            (j - self.width/2) / self.focal,   # x-direction
-            -(i - self.height/2) / self.focal,  # y-direction
-            -torch.ones_like(i, device=device)  # z-direction
-        ], dim=-1)  # (H*W, 3)
-        
-        # Repeat for each image
-        dirs = dirs.unsqueeze(0).repeat(self.n_images, 1, 1)  # (N, H*W, 3)
-        
-        # Rotate rays based on camera poses
-        rays_d = torch.zeros_like(dirs)
-        for i in range(self.n_images):
-            # Extract rotation matrix from pose
-            rot = self.poses[i, :3, :3]  # 3x3 rotation matrix
-            # Rotate directions
-            rays_d[i] = torch.matmul(dirs[i], rot.T)
-        
-        # Normalize directions
-        rays_d = F.normalize(rays_d, p=2, dim=-1)
-        
-        # Origins from camera poses
-        rays_o = self.poses[:, :3, 3].unsqueeze(1).repeat(1, self.height * self.width, 1)
-        
-        return rays_o, rays_d
     
-    def quaternion_to_rotation_matrix(self, q):
-        """Convert quaternions to rotation matrices."""
-        q = F.normalize(q, p=2, dim=1)  # Ensure unit quaternions
-        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-        
-        # Construct rotation matrix
-        rot = torch.zeros(q.shape[0], 3, 3, device=device)
-        
-        # Fill in rotation matrix elements
-        rot[:, 0, 0] = 1 - 2 * (y**2 + z**2)
-        rot[:, 0, 1] = 2 * (x * y - w * z)
-        rot[:, 0, 2] = 2 * (x * z + w * y)
-        
-        rot[:, 1, 0] = 2 * (x * y + w * z)
-        rot[:, 1, 1] = 1 - 2 * (x**2 + z**2)
-        rot[:, 1, 2] = 2 * (y * z - w * x)
-        
-        rot[:, 2, 0] = 2 * (x * z - w * y)
-        rot[:, 2, 1] = 2 * (y * z + w * x)
-        rot[:, 2, 2] = 1 - 2 * (x**2 + y**2)
-        
-        return rot
-    
-    def build_covariance_from_scaling_rotation(self, scaling, rotation):
-        """Build 3D covariance matrices from scaling and rotation."""
-        # Convert quaternion to rotation matrix
-        R = self.quaternion_to_rotation_matrix(rotation)
-        
-        # Create scaling matrix S
-        S = torch.diag_embed(scaling)
-        
-        # Compute covariance matrix: Sigma = R * S * S * R^T
-        S_squared = torch.matmul(S, S)
-        covariance = torch.matmul(torch.matmul(R, S_squared), R.transpose(1, 2))
-        
-        return covariance
-    
+    def initialize_falcor(self):
+        # 创建包含窗口的 testbed 实例，用于显示渲染结果
+        self.testbed = falcor.Testbed()
+        self.testbed.show_ui = False
+        self.falcordevice = self.testbed.device
+        DIR = Path(__file__).parent
+        self.generate_keys_pass = falcor.ComputePass(self.falcordevice, file = DIR/"tiles.cs.slang",cs_entry = "generate_keys_main")
+        self.compute_tile_ranges_pass = falcor.ComputePass(self.falcordevice, file = DIR/"tiles.cs.slang",cs_entry = "compute_tile_ranges_main")
     def render_image_with_diff_raster(self, camera_pose, height=None, width=None, scaling_modifier=1.0):
         """Render an image using diff_gaussian_rasterization."""
         if height is None:
@@ -366,6 +299,7 @@ class GaussianSplatting:
         out_cov3Ds = torch.zeros(N, 6, dtype=torch.float32, device=device)  # 3x3 对称矩阵的上三角部分
         out_rgb = torch.zeros(N, 3, dtype=torch.float32, device=device)
         out_inv_cov_vs = torch.zeros(N, 4, dtype=torch.float32, device=device)
+        out_rect_tile_space = np.zeros(shape=(N, 4), dtype=np.int32, device='cpu')
         out_tiles_touched = np.zeros(shape=(N), dtype=np.int32, device='cpu')
         out_pixels_xy = torch.zeros(size=(N, 2), dtype=torch.float32, device=device)
         testPointsVS = torch.ones(N, 3, dtype=torch.float32, device=device)
@@ -407,6 +341,7 @@ class GaussianSplatting:
             out_rgb,                            # 输出RGB颜色
             out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
             out_tiles_touched,                   # 输出触及的瓦片数
+            out_rect_tile_space,                # 输出矩形瓦片空间
             out_pixels_xy,                      # 输出像素坐标
             testPointsVS,
             p_hom_test
@@ -423,8 +358,109 @@ class GaussianSplatting:
         print(f"out_radii:{out_radii.mean()}")
         print(f"out_depths:{out_depths.mean()}")
         print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
+        print(f"ouy_tiles_touched:{out_tiles_touched.mean()}")
+        out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
+        index_buffer_offset = np.cumsum((out_tiles_touched), dtype=np.int32)
+        print(f"index_buffer_offset:{index_buffer_offset}")
+        total_size_index_buffer = index_buffer_offset[-1]
+        out_unsorted_keys = np.zeros((total_size_index_buffer), 
+                                    device="cpu", 
+                                    dtype=np.int64)
+        out_unsorted_gauss_idx = np.zeros((total_size_index_buffer), 
+                                    device="cpu", 
+                                    dtype=np.int32)
+        grid_height = math.ceil(int(height) / 16)
+        grid_width = math.ceil(int(width) / 16)
+        falcor_xyz_vs_buffer= self.falcordevice.create_structured_buffer(
+            struct_size=12,                # 每个 blob 占用 12 字节
+            element_count=out_xyz_vs.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        rect_tile_space_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=16,                # 每个 blob 占用 16 字节
+            element_count=out_rect_tile_space.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        index_buffer_offset_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=4,                # 每个 blob 占用 4 字节
+            element_count=index_buffer_offset.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        out_unsorted_keys_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=8,                # 每个 blob 占用 8 字节
+            element_count=out_unsorted_keys.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        print(f"out_unsorted_keys_buffer:{out_unsorted_keys.shape[0]}")
+        out_unsorted_gauss_idx_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=4,                # 每个 blob 占用 4 字节
+            element_count=out_unsorted_gauss_idx.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        falcor_xyz_vs_buffer.from_torch(out_xyz_vs.detach())
+        rect_tile_space_buffer.from_numpy(out_rect_tile_space)
+        index_buffer_offset_buffer.from_numpy(index_buffer_offset)
+        out_unsorted_keys_buffer.from_torch(torch.tensor(out_unsorted_keys).to('cuda'))
+        out_unsorted_gauss_idx_buffer.from_torch(torch.tensor(out_unsorted_gauss_idx).to('cuda'))
+        # 等待 CUDA 处理结束
+        self.falcordevice.render_context.wait_for_cuda()
+        vars = self.generate_keys_pass.globals.tiles_paramter
+        vars.xyz_vs = falcor_xyz_vs_buffer
+        vars.rect_tile_space = rect_tile_space_buffer
+        vars.index_buffer_offset = index_buffer_offset_buffer
+        vars.out_unsorted_keys = out_unsorted_keys_buffer
+        vars.out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer
+        vars.grid_height = grid_height
+        vars.grid_width = grid_width
+         # 执行 compute pass
+        self.generate_keys_pass.execute(threads_x=out_xyz_vs.shape[0])
+        # 等待 Falcor 处理结束
+        self.falcordevice.render_context.wait_for_falcor()
+        out_unsorted_keys = out_unsorted_keys_buffer.to_torch([total_size_index_buffer], falcor.int64)
+        out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer.to_torch([total_size_index_buffer], falcor.int32)
+        print(f"out_unsorted_keys[:10].mean:{out_unsorted_keys[:10].float().mean()}")
+        print(f"out_unsorted_gauss_idx[:10].mean:{out_unsorted_gauss_idx[:10].float().mean()}")
+        highest_tile_id_msb = (grid_width*grid_height).bit_length()
+        sorted_keys, sorted_gauss_idx = sort_by_keys_torch(out_unsorted_keys, out_unsorted_gauss_idx)
+        print(f"sorted_keys[:10].mean:{sorted_keys[:10].float().mean()}")
+        print(f"sorted_gauss_idx[:10].mean:{sorted_gauss_idx[:10].float().mean()}")
+        tile_ranges = torch.zeros((7*7, 2), 
+                                    device="cuda",
+                                    dtype=torch.int32)
+        sorted_keys_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=8,                # 每个 blob 占用 8 字节
+            element_count=sorted_keys.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        out_tile_ranges_buffer = self.falcordevice.create_structured_buffer(
+            struct_size=8,                # 每个 blob 占用 8 字节
+            element_count=tile_ranges.shape[0],        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
+        sorted_keys_buffer.from_torch(sorted_keys)
+        self.falcordevice.render_context.wait_for_cuda()
+        vars.sorted_keys = sorted_keys_buffer
+        vars.out_tile_ranges = out_tile_ranges_buffer
+        self.compute_tile_ranges_pass.execute(threads_x=sorted_keys.shape[0])
+        self.falcordevice.render_context.wait_for_falcor()
+        out_tile_ranges = out_tile_ranges_buffer.to_torch([7*7, 2], falcor.int32)
+        print(f"out_tile_ranges.mean:{out_tile_ranges.float().mean()}")
         # Render
-        rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity = rasterizer(
+        rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
             means3D=means3D,
             means2D=screenspace_points,
             shs=shs,  # Using spherical harmonics
@@ -446,6 +482,7 @@ class GaussianSplatting:
         print(f"invdepths:{invdepths.mean()}")
         print(f"depths:{depths.mean()}")
         print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
+        print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
         exit()
         rendered_image = rendered_image.permute(1, 2, 0).contiguous()
         rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
@@ -604,53 +641,17 @@ class GaussianSplatting:
         
         return frames
 
-# Installation helper function
-def check_and_install_diff_gaussian_rasterization():
-    """Check if diff_gaussian_rasterization is installed, if not, attempt to install it."""
-    try:
-        import diff_gaussian_rasterization
-        print("diff_gaussian_rasterization is already installed.")
-        return True
-    except ImportError:
-        print("diff_gaussian_rasterization not found. Attempting to install...")
-        try:
-            # Try to find the submodule directory in the repository
-            import os
-            if os.path.exists("submodules/diff-gaussian-rasterization"):
-                import subprocess
-                result = subprocess.run(
-                    ["pip", "install", "-e", "submodules/diff-gaussian-rasterization"],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode == 0:
-                    print("Successfully installed diff_gaussian_rasterization.")
-                    return True
-                else:
-                    print(f"Failed to install: {result.stderr}")
-                    return False
-            else:
-                print("Could not find diff-gaussian-rasterization in the submodules directory.")
-                print("Please install manually using:")
-                print("  git clone https://github.com/graphdeco-inria/diff-gaussian-rasterization.git")
-                print("  pip install -e ./diff-gaussian-rasterization")
-                return False
-        except Exception as e:
-            print(f"Error during installation: {e}")
-            return False
-
 # Main execution
 if __name__ == "__main__":
     import os
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-    # Check if diff_gaussian_rasterization is installed
-    if not check_and_install_diff_gaussian_rasterization():
-        print("Failed to install diff_gaussian_rasterization. Please install manually.")
-        exit(1)
-    
+
     # Create Gaussian Splatting model
     model = GaussianSplatting(num_gaussians=100000, learning_rate=1e-3)
-
+    
+    # while not model.testbed.should_close:
+    #     model.testbed.frame()
+        
     # Train the model
     losses = model.train(num_epochs=1000, batch_size=4096,save_dir='3dgs_rendered_images')
     

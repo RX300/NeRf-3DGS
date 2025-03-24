@@ -55,7 +55,8 @@ namespace CudaRasterizer
 			bool debug = false,
 			float* means2D = nullptr,
 			float* meansHomo = nullptr,
-			float* conic_opacity = nullptr);
+			float* conic_opacity = nullptr,
+			int* tiles_touched = nullptr);
 
 		static void backward(
 			const int P, int D, int M, int R,

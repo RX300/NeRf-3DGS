@@ -4,6 +4,8 @@ slangpy Docs:[SlangPy](https://slangpy.shader-slang.org/en/latest/index.html)
 
 slang gaussian:[slang-gaussian-rasterization/slang_gaussian_rasterization/internal/slang at main · google/slang-gaussian-rasterization](https://github.com/google/slang-gaussian-rasterization/tree/main/slang_gaussian_rasterization/internal/slang)
 
+[3d gaussian splatting核心代码注释（CUDA部分）_cub::devicescan::inclusivesum-CSDN博客](https://blog.csdn.net/xxxrc5/article/details/135695564)
+
 [矩阵：行主序、列主序、行向量、列向量 - 知乎](https://zhuanlan.zhihu.com/p/138920694)
 
 [Unity 和 Unreal 渲染中的坐标变换和跨平台兼容 - 知乎](https://zhuanlan.zhihu.com/p/590584851)
