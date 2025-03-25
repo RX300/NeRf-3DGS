@@ -1,5 +1,20 @@
-﻿import utils;
-import "slangpy";
+﻿// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//TODO: Clean-up shared-memory logic, too complicated, could be simplified.
+
+import utils;
 
 static const uint TILE_HEIGHT = PYTHON_TILE_HEIGHT;
 static const uint TILE_WIDTH = PYTHON_TILE_WIDTH;
@@ -43,11 +58,12 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
     uint32_t block_size = tile_height * tile_width;
     bool is_inside = (pix_coord.x < W && pix_coord.y < H);
     bool thread_active = is_inside;
-
+    // shared_memory_rounds是用于解决一个gaussian可能跨越多个tile的问题
     const int shared_memory_rounds = ((tile_idx_end - tile_idx_start + block_size - 1) / block_size);
     uint32_t thread_rank = cudaThreadIdx().y * cudaBlockDim().x + cudaThreadIdx().x;
 
     int32_t local_n_contrib = 0;
+    // splats_left_to_process是表示当前tile还有多少个gaussian需要处理
     int splats_left_to_process = tile_idx_end - tile_idx_start;
     for (int i = 0; i < shared_memory_rounds; i++)
     {
@@ -61,6 +77,7 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
         }
         AllMemoryBarrierWithGroupSync();
         if (thread_active) {
+            //每次最多处理每个tile里的gaussian数量
             for (int j = 0; j < min(block_size, splats_left_to_process); j++)
             {
                 local_n_contrib++;
@@ -81,6 +98,7 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                 curr_pixel_state = new_pixel_state;
             }
         }
+        // 更新剩余的gaussian数量
         splats_left_to_process -= block_size;
     }
 

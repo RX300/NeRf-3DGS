@@ -4,7 +4,13 @@ slangpy Docs:[SlangPy](https://slangpy.shader-slang.org/en/latest/index.html)
 
 slang gaussian:[slang-gaussian-rasterization/slang_gaussian_rasterization/internal/slang at main · google/slang-gaussian-rasterization](https://github.com/google/slang-gaussian-rasterization/tree/main/slang_gaussian_rasterization/internal/slang)
 
+3dGs的代码注释：
+
 [3d gaussian splatting核心代码注释（CUDA部分）_cub::devicescan::inclusivesum-CSDN博客](https://blog.csdn.net/xxxrc5/article/details/135695564)
+
+[3DGS-结合源码做更细节一点的简单解析-3D Gaussian Splatting - 知乎](https://zhuanlan.zhihu.com/p/974410291)
+
+坐标系转换：
 
 [矩阵：行主序、列主序、行向量、列向量 - 知乎](https://zhuanlan.zhihu.com/p/138920694)
 

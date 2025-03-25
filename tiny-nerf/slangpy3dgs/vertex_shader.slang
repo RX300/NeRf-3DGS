@@ -145,13 +145,13 @@ void preprocess_shader(
     // 计算高斯点的半径
     float radius = splat_radius(cov_plus_h, det_cov_plus_h);
 
-    // 计算像素空间坐标
+    // 计算高斯均值投影到二维平面上的像素空间坐标
     float2 pixelspace_xy = {
         ndc2pix(splat.xyz_vs.x, image_width),
         ndc2pix(splat.xyz_vs.y, image_height)
     };
     pixelspace_uv = pixelspace_xy;
-    // 计算矩形覆盖的瓦片区域
+    // 计算高斯覆盖的tile区域,用矩形表示
     rectangle rect_tile_space = get_rectangle_tile_space(
         pixelspace_xy,
         radius,
@@ -208,7 +208,7 @@ void preprocess_shader(
 
 
     // 存储RGB颜色（应用h_convolution_scaling）
-    float opacity = h_convolution_scaling; // 在完整实现中，应该使用实际的不透明度
+    opacity *= h_convolution_scaling; // 在完整实现中，应该使用实际的不透明度
     out_rgb = splat.rgb;
 }
 

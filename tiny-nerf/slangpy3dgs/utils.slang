@@ -285,6 +285,20 @@ Splat_2D_AlphaBlend load_splat_alphablend(int32_t g_idx,
 }
 
 [Differentiable]
+Splat_2D_AlphaBlend load_splat_alphablendv2(float3 xyz_vs,
+                                        float4 inv_cov_vs,
+                                        float opacity,
+                                        float3 rgb)
+{
+    float3 g_xyz_vs = xyz_vs;
+    float3 g_rgb = rgb;
+    float g_opacity = opacity;
+    float2x2 g_inv_cov = float2x2(inv_cov_vs[0], inv_cov_vs[1], inv_cov_vs[2], inv_cov_vs[3]);
+
+    return { g_xyz_vs, g_rgb, g_opacity, g_inv_cov };
+}
+
+[Differentiable]
 float4 evaluate_splat(Splat_2D_AlphaBlend g, 
                       float2 pix_coord,
                       uint32_t H,
