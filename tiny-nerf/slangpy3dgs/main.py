@@ -13,6 +13,7 @@ from simple_knn._C import distCUDA2
 import slangpy as spy
 import pathlib
 import falcor
+from falcor_renderer import FalcorGaussianRenderer, render_gaussian_image
 
 # Import the diff_gaussian_rasterization module
 try:
@@ -217,14 +218,10 @@ class GaussianSplatting:
         self.features_rest = nn.Parameter(data=torch.zeros(self.num_gaussians, (self.sh_degree+1)**2-1, 3, device=device), requires_grad=True)   
     
     def initialize_falcor(self):
-        # 创建包含窗口的 testbed 实例，用于显示渲染结果
-        self.testbed = falcor.Testbed()
-        self.testbed.show_ui = False
-        self.falcordevice = self.testbed.device
-        DIR = Path(__file__).parent
-        self.generate_keys_pass = falcor.ComputePass(self.falcordevice, file = DIR/"tiles.cs.slang",cs_entry = "generate_keys_main")
-        self.compute_tile_ranges_pass = falcor.ComputePass(self.falcordevice, file = DIR/"tiles.cs.slang",cs_entry = "compute_tile_ranges_main")
-        self.fragment_pass = falcor.ComputePass(self.falcordevice, file = DIR/"fragment.cs.slang",cs_entry = "splat_tiled_main")
+        # 替换原来的 initialize_falcor
+        self.falcor_renderer = FalcorGaussianRenderer()
+        self.testbed = self.falcor_renderer.testbed
+        self.falcordevice = self.falcor_renderer.device
     def render_image_with_diff_raster(self, camera_pose, height=None, width=None, scaling_modifier=1.0):
         """Render an image using diff_gaussian_rasterization."""
         if height is None:
@@ -286,7 +283,8 @@ class GaussianSplatting:
         means3D = means3D.contiguous()
         scales = scales.contiguous()
         rotations = rotations.contiguous()
-        opacity = opacity.contiguous()
+        # 将out_opacity = opacity.contiguous().squeeze()复制到 新的tensor：out_opcity上
+        out_opacity = opacity.contiguous().squeeze().clone()
         # 2. 将世界视图变换矩阵转为合适格式
         world_view_transform = world_view_transform.float().contiguous()
         full_proj_transform = full_proj_transform.float().contiguous()
@@ -316,11 +314,37 @@ class GaussianSplatting:
         # print(shs.shape)
         # self.utilsmodule.testNdArray(shs.reshape(self.num_gaussians,-1))
 
+        # self.shadermodule.preprocess_shader_release(
+        #     spy.thread_id(),                    # g_idx - 线程ID
+        #     means3D,                            # xyz_ws - 世界空间中高斯点的位置
+        #     shs.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+        #     out_opacity,                            # opacities - 不透明度
+        #     rotations,                          # rotations - 旋转四元数
+        #     scales,                             # scales - 缩放系数
+        #     3,                                  # active_sh - 活动的球谐阶数
+        #     1.0,                                # scale_modifier - 缩放修正系数
+        #     world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
+        #     projection_matrix.T.reshape(-1),                # proj_mat - 投影矩阵
+        #     camera_center,                      # cam_pos - 相机位置
+        #     fov,                                # fovy - 视场角y
+        #     fov,                                # fovx - 视场角x
+        #     int(height),                        # image_height - 图像高度
+        #     int(width),                         # image_width - 图像宽度
+        #     False,                              # prefiltered - 是否预过滤
+        #     True,                                # antialiasing - 是否抗锯齿
+        #     out_radii,                          # 输出半径
+        #     out_xyz_vs,                         # 输出视图空间位置  
+        #     out_cov3Ds,                         # 输出3D协方差矩阵
+        #     out_rgb,                            # 输出RGB颜色
+        #     out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
+        #     out_tiles_touched,                   # 输出触及的瓦片数
+        #     out_rect_tile_space                # 输出矩形瓦片空间
+        # )
         self.shadermodule.preprocess_shader(
             spy.thread_id(),                    # g_idx - 线程ID
             means3D,                            # xyz_ws - 世界空间中高斯点的位置
             shs.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
-            opacity.squeeze(),                            # opacities - 不透明度
+            out_opacity,                            # opacities - 不透明度
             rotations,                          # rotations - 旋转四元数
             scales,                             # scales - 缩放系数
             3,                                  # active_sh - 活动的球谐阶数
@@ -351,191 +375,35 @@ class GaussianSplatting:
         # print(f"gtPointsVS:{gtPointsVS.mean(dim=0)}")
         # print(f"testPointsVS:{testPointsVS.mean(dim=0)}")
         # meansHomo = torch.matmul(means3Dhomogeneous, full_proj_transform)
-        # print(f"out_xyz_vs:{out_xyz_vs.mean(dim=0)}")
+        print(f"out_xyz_vs:{out_xyz_vs.mean(dim=0)}")
         # print(f"meansHomo:{meansHomo.mean(dim=0)}")
         print(f"out_pixels_xy:{out_pixels_xy.mean(dim=0)}")
         print(f"conic:{p_hom_test.mean(dim=0)}")
         print(f"out_radii:{out_radii.mean()}")
         print(f"out_depths:{out_depths.mean()}")
         print(f"out_rgb:{out_rgb.mean(dim=0)}")
+        print(f"out_opcity:{out_opacity.mean()}")
         print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
         print(f"out_tiles_touched:{out_tiles_touched.mean()}")
         out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
         index_buffer_offset = np.cumsum((out_tiles_touched), dtype=np.int32)
         print(f"num_threads:{index_buffer_offset[-1]}")
-        total_size_index_buffer = index_buffer_offset[-1]
-        out_unsorted_keys = np.zeros((total_size_index_buffer), 
-                                    device="cpu", 
-                                    dtype=np.int64)
-        out_unsorted_gauss_idx = np.zeros((total_size_index_buffer), 
-                                    device="cpu", 
-                                    dtype=np.int32)
-        grid_height = math.ceil(int(height) / 16)
-        grid_width = math.ceil(int(width) / 16)
-        falcor_xyz_vs_buffer= self.falcordevice.create_structured_buffer(
-            struct_size=12,                # 每个 blob 占用 12 字节
-            element_count=out_xyz_vs.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
+
+        print(f"======================falcor==========================")
+        rendered_image_falcor = render_gaussian_image(
+            self.falcor_renderer,
+            out_xyz_vs, 
+            out_inv_cov_vs, 
+            out_opacity, 
+            out_rgb, 
+            out_rect_tile_space, 
+            index_buffer_offset, 
+            width, 
+            height
         )
-        rect_tile_space_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=16,                # 每个 blob 占用 16 字节
-            element_count=out_rect_tile_space.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        index_buffer_offset_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=4,                # 每个 blob 占用 4 字节
-            element_count=index_buffer_offset.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        out_unsorted_keys_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=8,                # 每个 blob 占用 8 字节
-            element_count=out_unsorted_keys.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        out_unsorted_gauss_idx_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=4,                # 每个 blob 占用 4 字节
-            element_count=out_unsorted_gauss_idx.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        falcor_xyz_vs_buffer.from_torch(out_xyz_vs.detach())
-        rect_tile_space_buffer.from_numpy(out_rect_tile_space)
-        index_buffer_offset_buffer.from_numpy(index_buffer_offset)
-        out_unsorted_keys_buffer.from_torch(torch.tensor(out_unsorted_keys).to('cuda'))
-        out_unsorted_gauss_idx_buffer.from_torch(torch.tensor(out_unsorted_gauss_idx).to('cuda'))
-        # 等待 CUDA 处理结束
-        self.falcordevice.render_context.wait_for_cuda()
-        vars = self.generate_keys_pass.globals.tiles_paramter
-        vars.xyz_vs = falcor_xyz_vs_buffer
-        vars.rect_tile_space = rect_tile_space_buffer
-        vars.index_buffer_offset = index_buffer_offset_buffer
-        vars.out_unsorted_keys = out_unsorted_keys_buffer
-        vars.out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer
-        vars.grid_height = grid_height
-        vars.grid_width = grid_width
-         # 执行 compute pass
-        self.generate_keys_pass.execute(threads_x=out_xyz_vs.shape[0])
-        # 等待 Falcor 处理结束
-        self.falcordevice.render_context.wait_for_falcor()
-        out_unsorted_keys = out_unsorted_keys_buffer.to_torch([total_size_index_buffer], falcor.int64)
-        out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer.to_torch([total_size_index_buffer], falcor.int32)
-        print(f"out_unsorted_keys[:10].mean:{out_unsorted_keys[:10].float().mean()}")
-        print(f"out_unsorted_gauss_idx[:10].mean:{out_unsorted_gauss_idx[:10].float().mean()}")
-        highest_tile_id_msb = (grid_width*grid_height).bit_length()
-        sorted_keys, sorted_gauss_idx = sort_by_keys_torch(out_unsorted_keys, out_unsorted_gauss_idx)
-        print(f"sorted_keys[:10].mean:{sorted_keys[:10].float().mean()}")
-        print(f"sorted_gauss_idx[:10].mean:{sorted_gauss_idx[:10].float().mean()}")
-        tile_ranges = torch.zeros((grid_width*grid_height, 2), 
-                                    device="cuda",
-                                    dtype=torch.int32)
-        sorted_keys_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=8,                # 每个 blob 占用 8 字节
-            element_count=sorted_keys.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        out_tile_ranges_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=8,                # 每个 blob 占用 8 字节
-            element_count=tile_ranges.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        sorted_keys_buffer.from_torch(sorted_keys.detach())
-        self.falcordevice.render_context.wait_for_cuda()
-        vars = self.compute_tile_ranges_pass.globals.tiles_paramter
-        vars.sorted_keys = sorted_keys_buffer
-        vars.out_tile_ranges = out_tile_ranges_buffer
-        self.compute_tile_ranges_pass.execute(threads_x=sorted_keys.shape[0])
-        self.falcordevice.render_context.wait_for_falcor()
-        out_tile_ranges = out_tile_ranges_buffer.to_torch([grid_width*grid_height, 2], falcor.int32)
-        print(f"out_tile_ranges.mean:{out_tile_ranges.float().mean(dim=0)}")
-        sorted_gauss_idx_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=4,                # 每个 blob 占用 4 字节
-            element_count=sorted_gauss_idx.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        inv_cov_vs_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=16,                # 每个 blob 占用 16 字节
-            element_count=out_inv_cov_vs.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        opacity_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=4,                # 每个 blob 占用 4 字节
-            element_count=opacity.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        gaussian_rgb_buffer = self.falcordevice.create_structured_buffer(
-            struct_size=12,                # 每个 blob 占用 12 字节
-            element_count=out_rgb.shape[0],        # blob 数量
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        output_img_texture = self.falcordevice.create_texture(
-            width=width,
-            height=height,
-            format=falcor.ResourceFormat.RGBA32Float,
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        n_contributors_texture = self.falcordevice.create_texture(
-            width=width,
-            height=height,
-            format=falcor.ResourceFormat.R32Uint,
-            bind_flags=falcor.ResourceBindFlags.ShaderResource
-            | falcor.ResourceBindFlags.UnorderedAccess
-            | falcor.ResourceBindFlags.Shared,
-        )
-        tile_ranges_buffer = out_tile_ranges_buffer
-        xyz_vs_buffer = falcor_xyz_vs_buffer
-        inv_cov_vs_buffer.from_torch(out_inv_cov_vs.detach())
-        opacity_buffer.from_torch(opacity.detach())
-        sorted_gauss_idx_buffer.from_torch(sorted_gauss_idx.detach())
-        # create a texture for the background color([width, height, 4]),default black
-        bg_color_numpy = np.zeros((width, height, 4), dtype=np.float32)
-        gaussian_rgb_buffer.from_torch(out_rgb.detach())
-        out_image_numpy = np.zeros((width, height, 4), dtype=np.float32)
-        output_img_texture.from_numpy(out_image_numpy)
-        n_contributors_numpy = np.zeros((width, height), dtype=np.uint32)
-        n_contributors_texture.from_numpy(n_contributors_numpy)
-        self.falcordevice.render_context.wait_for_cuda()
-        vars = self.fragment_pass.globals.fragment_parameter
-        vars.sorted_gauss_idx = sorted_gauss_idx_buffer
-        vars.tile_ranges = tile_ranges_buffer
-        vars.xyz_vs = xyz_vs_buffer
-        vars.inv_cov_vs = inv_cov_vs_buffer
-        vars.opacity = opacity_buffer
-        vars.gaussian_rgb = gaussian_rgb_buffer
-        vars.output_img = output_img_texture
-        vars.n_contributors = n_contributors_texture
-        vars.grid_height = grid_height
-        vars.grid_width = grid_width
-        vars.tile_height = 16
-        vars.tile_width = 16
-        self.fragment_pass.execute(threads_x=width, threads_y=height)
-        self.falcordevice.render_context.wait_for_falcor()
-        out_img = output_img_texture.to_numpy()
-        # 计算out_img的平均值
-        print(f"out_img.shape:{out_img.shape}")
-        print(f"out_img.mean:{out_img.reshape(-1,4).mean(axis=0)}")
+        print(rendered_image_falcor.shape)
+        print(f"rendered_image_falcor.mean:{rendered_image_falcor.reshape(-1,4).mean(dim=0)}")
+
         # Render
         rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
             means3D=means3D,
@@ -547,6 +415,7 @@ class GaussianSplatting:
             rotations=rotations,
             cov3D_precomp=None  # Will be computed from scales and rotations
         )
+        print(f"======================gt==========================")
         # print(f"meanshomo.shape:{meanshomo.shape}")
         # print(f"meanshomo:{meanshomo.mean(dim=0)}")
         print(f"means2D.shape:{means2D.shape}")
@@ -561,11 +430,11 @@ class GaussianSplatting:
         print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
         print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
         print(f"rendered_image.mean:{rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
-        exit()
         # [C H W] => [H W C]
         rendered_image = rendered_image.permute(1, 2, 0).contiguous()
         rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
-        return rendered_image
+        exit()
+        return rendered_image,rendered_image_falcor
     
     def debug_image_values(self, rendered_image):
         # Check for NaNs or Infs
@@ -623,7 +492,7 @@ class GaussianSplatting:
                     print(f"nan值数量：{torch.isnan(self.means).sum()}")
                 # else:
                 #     print(f"在{epoch}次第{img_idx}张图片的训练means3D中没有nan值")
-                rendered_image = self.render_image_with_diff_raster(pose)
+                rendered_image,render_image_with_diff_raster = self.render_image_with_diff_raster(pose)
                 if img_idx == self.n_images-1:
                     self.debug_image_values(rendered_image)
 
@@ -631,9 +500,13 @@ class GaussianSplatting:
                 gt_image_reshaped = gt_image.reshape(-1, 3)
                 rendered_image_reshaped = rendered_image.reshape(-1, 3)
                 loss = mse(rendered_image, gt_image)
-                
+                loss_falcor = mse(render_image_with_diff_raster[:,:,:3], gt_image)
                 # Backward pass
-                loss.backward()
+                #loss.backward()
+                loss_falcor.backward()
+                # print self.xyz.grad
+                print(f"grad:{self.means.grad.mean(dim=0)}")
+                exit()
                 #self.gaussians.optimizer.step()
                 self.optimizer.step()
                 

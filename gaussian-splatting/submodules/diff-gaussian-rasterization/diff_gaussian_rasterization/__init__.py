@@ -87,11 +87,12 @@ class _RasterizeGaussians(torch.autograd.Function):
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, opacities, geomBuffer, binningBuffer, imgBuffer)
+        #   return color, radii, invdepths
         return color, radii, invdepths,means2D,meansHomo,conic_opacity,tiles_touched
 
     @staticmethod
-    def backward(ctx, grad_out_color, _, grad_out_depth):
-
+    def backward(ctx, grad_out_color, _, grad_out_depth,grad_out_means2D,grad_out_meansHomo,grad_out_conic_opacity,grad_out_tiles_touched):
+    #   def backward(ctx, grad_out_color, _, grad_out_depth):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
