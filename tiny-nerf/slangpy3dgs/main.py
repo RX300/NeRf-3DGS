@@ -280,11 +280,11 @@ class GaussianSplatting:
         rotations = torch.nn.functional.normalize(self.rotations)  # Ensure unit quaternions
         opacity = torch.sigmoid(self.opacities)  # Apply activation to opacities
         # 1. 确保参数形状正确
-        means3D = means3D.contiguous()
-        scales = scales.contiguous()
-        rotations = rotations.contiguous()
+        means3Dslang = means3D.contiguous().clone().detach().requires_grad_(True)
+        scalesslang = scales.contiguous().clone().detach().requires_grad_(True)
+        rotationsslang = rotations.contiguous().clone().detach().requires_grad_(True)
         # 将out_opacity = opacity.contiguous().squeeze()复制到 新的tensor：out_opcity上
-        out_opacity = opacity.contiguous().squeeze().clone()
+        out_opacity = opacity.contiguous().squeeze().clone().detach().requires_grad_(True)
         # 2. 将世界视图变换矩阵转为合适格式
         world_view_transform = world_view_transform.float().contiguous()
         full_proj_transform = full_proj_transform.float().contiguous()
@@ -302,7 +302,7 @@ class GaussianSplatting:
         out_pixels_xy = torch.zeros(size=(N, 2), dtype=torch.float32, device=device)
         testPointsVS = torch.ones(N, 3, dtype=torch.float32, device=device)
         p_hom_test = torch.zeros(N, 4, dtype=torch.float32, device=device)
-        conic_opacity = torch.zeros(N, 4, dtype=torch.float32, device=device)
+        # conic_opacity = torch.zeros(N, 4, dtype=torch.float32, device=device)
         # means.shape => [num_gaussians, 3]
         # scales.shape => [num_gaussians, 3]
         # rotations.shape => [num_gaussians, 4]
@@ -310,6 +310,7 @@ class GaussianSplatting:
         #这里一定要在每次训练前重新拼接sh_coeffs
         # shs.shape => [num_gaussians, sh_dim, 3]
         shs = torch.cat((self.features_dc, self.features_rest), dim=1)
+        shsslang = shs.contiguous().clone().detach().requires_grad_(True)
         # gaussian = torch.ones(size=(100000,48), dtype=torch.float32, device='cuda', requires_grad=True)
         # print(shs.shape)
         # self.utilsmodule.testNdArray(shs.reshape(self.num_gaussians,-1))
@@ -342,11 +343,11 @@ class GaussianSplatting:
         # )
         self.shadermodule.preprocess_shader(
             spy.thread_id(),                    # g_idx - 线程ID
-            means3D,                            # xyz_ws - 世界空间中高斯点的位置
-            shs.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+            means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
+            shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
             out_opacity,                            # opacities - 不透明度
-            rotations,                          # rotations - 旋转四元数
-            scales,                             # scales - 缩放系数
+            rotationsslang,                          # rotations - 旋转四元数
+            scalesslang,                             # scales - 缩放系数
             3,                                  # active_sh - 活动的球谐阶数
             1.0,                                # scale_modifier - 缩放修正系数
             world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
@@ -433,7 +434,7 @@ class GaussianSplatting:
         # [C H W] => [H W C]
         rendered_image = rendered_image.permute(1, 2, 0).contiguous()
         rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
-        exit()
+
         return rendered_image,rendered_image_falcor
     
     def debug_image_values(self, rendered_image):
@@ -502,11 +503,10 @@ class GaussianSplatting:
                 loss = mse(rendered_image, gt_image)
                 loss_falcor = mse(render_image_with_diff_raster[:,:,:3], gt_image)
                 # Backward pass
-                #loss.backward()
+                loss.backward()
                 loss_falcor.backward()
                 # print self.xyz.grad
                 print(f"grad:{self.means.grad.mean(dim=0)}")
-                exit()
                 #self.gaussians.optimizer.step()
                 self.optimizer.step()
                 
@@ -523,7 +523,7 @@ class GaussianSplatting:
             if (epoch + 1) % 50 == 0 or epoch == 0:
                 test_pose = self.poses[0]  # Use first pose for visualization
                 with torch.no_grad():
-                    rendered_image = self.render_image(test_pose)
+                    rendered_image,_ = self.render_image(test_pose)
                     self.debug_image_values(rendered_image)
                     rendered_image_numpy = rendered_image.cpu().numpy()
                     rendered_image_numpy = (255*np.clip(rendered_image_numpy, 0.0, 1.0)).astype(np.uint8)

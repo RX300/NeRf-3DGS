@@ -125,8 +125,13 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raster_settings.debug)
 
         # Compute gradients for relevant tensors by invoking backward method
-        grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)        
-
+        grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations,\
+              dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender = _C.rasterize_gaussians_backward(*args)        
+        # 打印dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender的均值(dim=0)
+        print('dL_dmeans2Drender:',dL_dmeans2Drender.mean(dim=0))
+        print('dL_dopacityrender:',dL_dopacityrender.mean(dim=0))
+        print('dL_dcolorsrender:',dL_dcolorsrender.mean(dim=0))
+        
         grads = (
             grad_means3D,
             grad_means2D,

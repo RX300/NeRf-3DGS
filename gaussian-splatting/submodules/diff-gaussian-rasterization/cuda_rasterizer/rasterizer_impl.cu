@@ -441,6 +441,9 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
+	float* dL_means2Drerender,
+	float* dL_opacityrender,
+	float* dL_colorsrender,
 	bool antialiasing,
 	bool debug)
 {
@@ -483,6 +486,21 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dopacity,
 		dL_dcolor,
 		dL_dinvdepth), debug);
+	CHECK_CUDA(cudaMemcpy(dL_means2Drerender, dL_dmean2D, P * 3 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+	CHECK_CUDA(cudaMemcpy(dL_opacityrender, dL_dopacity, P * 1 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+	CHECK_CUDA(cudaMemcpy(dL_colorsrender, dL_dcolor, P * 3 * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+	// // 打印均值
+	// printf("cuda:dL_dmean2D mean: %f, %f\n", sum.x / P, sum.y / P);
+	// // 释放主机内存
+	// delete[] h_dL_dmean2D;
+	// // 计算dL_dopacity的均值并且打印出来
+	// float* h_dL_dopacity = new float[P];
+	// cudaMemcpy(h_dL_dopacity, dL_dopacity, P * sizeof(float), cudaMemcpyDeviceToHost);
+	// float sum_opacity = 0.0f;
+	// for (int i = 0; i < P; i++) {
+	// 	sum_opacity += h_dL_dopacity[i];
+	// }
+	// printf("cuda:dL_dopacity mean: %f\n", sum_opacity / P);
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,

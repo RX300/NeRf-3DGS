@@ -56,13 +56,16 @@ float4 alpha_blend(uint32_t2 pix_coord,
                    uint32_t tile_idx_end,
                    uint32_t H,
                    uint32_t W,
-                   uint3 tid,
-                   uint thread_rank)
+                   uint3 tid,         //线程的全局三维索引
+                   uint thread_rank  //线程在线程组内的一维索引
+                   )
 {
     float2 center_pix_coord = pix_coord;
     float4 curr_pixel_state = float4(0.f, 0.f, 0.f, 1.f);
     uint32_t block_size = fragment_parameter.tile_height * fragment_parameter.tile_width;
     bool is_inside = (pix_coord.x < W && pix_coord.y < H);
+    if(!is_inside)
+        return curr_pixel_state;
     bool thread_active = is_inside;
 
     const int shared_memory_rounds = ((tile_idx_end - tile_idx_start + block_size - 1) / block_size);
@@ -107,11 +110,12 @@ float4 alpha_blend(uint32_t2 pix_coord,
         splats_left_to_process -= block_size;
     }
 
-    if (is_inside)
-        fragment_parameter.n_contributors[uint2(uint32_t(pix_coord.x), uint32_t(pix_coord.y))] = local_n_contrib;
+    fragment_parameter.n_contributors[uint2(uint32_t(pix_coord.x), uint32_t(pix_coord.y))] = local_n_contrib;
 
     return curr_pixel_state;
 }
+
+// https://zhuanlan.zhihu.com/p/30654608000
 
 void bwd_alpha_blend(uint32_t2 pix_coord,
                      uint32_t tile_idx_start,
@@ -125,111 +129,112 @@ void bwd_alpha_blend(uint32_t2 pix_coord,
     // Load the final pixel state.
     bool is_inside = (pix_coord.x < W && pix_coord.y < H);
     uint32_t block_size = fragment_parameter.tile_height * fragment_parameter.tile_width;
-    const int shared_memory_rounds = ((tile_idx_end - tile_idx_start + block_size - 1) / block_size);
+    // const int shared_memory_rounds = ((tile_idx_end - tile_idx_start + block_size - 1) / block_size);
     const int rounds = ((tile_idx_end - tile_idx_start + block_size - 1) / block_size);
-    if (rounds <= 0)
-        fragment_parameter.grad_rgb.InterlockedAddF32(0, 2.0f);
-    else
-        fragment_parameter.grad_rgb.InterlockedAddF32(4, 2.0f);
-    return;
-    // int splats_left_to_process = tile_idx_end - tile_idx_start;
-    // uint32_t current_splat_offset = tile_idx_end - tile_idx_start;
 
-    // float4 current_pixel_state;
-    // int32_t n_contrib_fwd;
-    // if (is_inside) {
-    //     current_pixel_state = fragment_parameter.output_img[pix_coord];
-    //     n_contrib_fwd = fragment_parameter.n_contributors[uint2(uint32_t(pix_coord.x), uint32_t(pix_coord.y))];
-    // }
+    // if (rounds <= 0)
+    //     fragment_parameter.grad_rgb.InterlockedAddF32(0, 2.0f);
+    // else
+    //     fragment_parameter.grad_rgb.InterlockedAddF32(4, 2.0f);
+    // return;
 
-    // float2 center_pix_coord = pix_coord;
-    // DifferentialPair<float2> dp_center_pix_coord = diffPair(center_pix_coord);
+    int splats_left_to_process = tile_idx_end - tile_idx_start;
+    uint32_t current_splat_offset = tile_idx_end - tile_idx_start;
 
-    // for (int i = 0; i < rounds; i++)
-    // {
-    //     fragment_parameter.grad_rgb.InterlockedAddF32(0, 1.0f);
-    //     // Collectively fetch per-Gaussian data from global to shared
-    //     AllMemoryBarrierWithGroupSync();
-    //     int progress = i * block_size + thread_rank;
-    //     if (tile_idx_start + progress < tile_idx_end)
-    //     {
-    //         uint32_t coll_id = uint32_t(fragment_parameter.sorted_gauss_idx[tile_idx_end - progress - 1]);
-    //         collected_idx[thread_rank] = coll_id;
-    //         collected_splats[thread_rank] = load_splat_alphablendv2(
-    //             fragment_parameter.xyz_vs[coll_id], fragment_parameter.inv_cov_vs[coll_id],
-    //             fragment_parameter.opacity[coll_id], fragment_parameter.gaussian_rgb[coll_id]);
-    //     }
-    //     AllMemoryBarrierWithGroupSync();
-    //     if (is_inside) {
-    //         for (int j = 0; j < min(block_size, splats_left_to_process); j++)
-    //         {
-    //             current_splat_offset--;
-    //             if (current_splat_offset >= n_contrib_fwd)
-    //                 continue;
-    //             uint32_t g_idx = collected_idx[j];
-    //             Splat_2D_AlphaBlend g = collected_splats[j];
+    float4 current_pixel_state;
+    int32_t n_contrib_fwd;
+    if (is_inside) {
+        current_pixel_state = fragment_parameter.output_img[pix_coord];
+        n_contrib_fwd = fragment_parameter.n_contributors[uint2(uint32_t(pix_coord.x), uint32_t(pix_coord.y))];
+    }
+    float2 center_pix_coord = pix_coord;
+    DifferentialPair<float2> dp_center_pix_coord = diffPair(center_pix_coord);
+    // current_pixel_state =float4(1.0f,1.0f,1.0f,1.0f);
+    for (int i = 0; i < rounds; i++)
+    {
+        // Collectively fetch per-Gaussian data from global to shared
+        AllMemoryBarrierWithGroupSync();
+        // 当前处理的gaussian是当前block中的第几个
+        int progress = i * block_size + thread_rank;
+        if (tile_idx_start + progress < tile_idx_end)
+        {
+            uint32_t coll_id = uint32_t(fragment_parameter.sorted_gauss_idx[tile_idx_end - progress - 1]);
+            collected_idx[thread_rank] = coll_id;
+            collected_splats[thread_rank] = load_splat_alphablendv2(
+                fragment_parameter.xyz_vs[coll_id], fragment_parameter.inv_cov_vs[coll_id],
+                fragment_parameter.opacity[coll_id], fragment_parameter.gaussian_rgb[coll_id]);
+        }
+        AllMemoryBarrierWithGroupSync();
+        if (is_inside) {
+            for (int j = 0; j < min(block_size, splats_left_to_process); j++)
+            {
+                current_splat_offset--;
+                if (current_splat_offset >= n_contrib_fwd)
+                    continue;
+                uint32_t g_idx = collected_idx[j];
+                Splat_2D_AlphaBlend g = collected_splats[j];
 
-    //             float4 gauss_rgba = evaluate_splat(g, center_pix_coord, H, W);
+                float4 gauss_rgba = evaluate_splat(g, center_pix_coord, H, W);
 
-    //             if (gauss_rgba.a < 1.0f / 255.0f)
-    //                 continue;
+                if (gauss_rgba.a < 1.0f / 255.0f)
+                    continue;
+                // fragment_parameter.grad_rgb.InterlockedAddF32(0, 10.0f);
+                // Undo pixel state
+                current_pixel_state = undo_pixel_state(current_pixel_state, gauss_rgba);
 
-    //             // Undo pixel state
-    //             current_pixel_state = undo_pixel_state(current_pixel_state, gauss_rgba);
+                // Back-prop automatically through blending and gaussian evaluation.
+                DifferentialPair<Splat_2D_AlphaBlend> dp_g = diffPair(g);
+                DifferentialPair<float3> dp_xyz_vs = diffPair(fragment_parameter.xyz_vs[g_idx]);
+                DifferentialPair<float4> dp_inv_cov_vs = diffPair(fragment_parameter.inv_cov_vs[g_idx]);
+                DifferentialPair<float3> dp_gauss_rgb = diffPair(fragment_parameter.gaussian_rgb[g_idx]);
+                DifferentialPair<float> dp_opacity = diffPair(fragment_parameter.opacity[g_idx]);
+                DifferentialPair<float4> dp_gauss_rgba = diffPair(gauss_rgba);
+                DifferentialPair<float4> dp_current_pixel_state = diffPair(current_pixel_state);
 
-    //             // Back-prop automatically through blending and gaussian evaluation.
-    //             DifferentialPair<Splat_2D_AlphaBlend> dp_g = diffPair(g);
-    //             DifferentialPair<float3> dp_xyz_vs = diffPair(fragment_parameter.xyz_vs[g_idx]);
-    //             DifferentialPair<float4> dp_inv_cov_vs = diffPair(fragment_parameter.inv_cov_vs[g_idx]);
-    //             DifferentialPair<float3> dp_gauss_rgb = diffPair(fragment_parameter.gaussian_rgb[g_idx]);
-    //             DifferentialPair<float> dp_opacity = diffPair(fragment_parameter.opacity[g_idx]);
-    //             DifferentialPair<float4> dp_gauss_rgba = diffPair(gauss_rgba);
-    //             DifferentialPair<float4> dp_current_pixel_state = diffPair(current_pixel_state);
+                bwd_diff(update_pixel_state)(dp_current_pixel_state, dp_gauss_rgba, d_current_pixel_state);
+                d_current_pixel_state = dp_current_pixel_state.getDifferential();
+                bwd_diff(evaluate_splat)(dp_g, dp_center_pix_coord, H, W, dp_gauss_rgba.d);
+                bwd_diff(load_splat_alphablendv2)(dp_xyz_vs, dp_inv_cov_vs, dp_opacity, dp_gauss_rgb, dp_g.d);
 
-    //             bwd_diff(update_pixel_state)(dp_current_pixel_state, dp_gauss_rgba, d_current_pixel_state);
-    //             d_current_pixel_state = dp_current_pixel_state.getDifferential();
-    //             bwd_diff(evaluate_splat)(dp_g, dp_center_pix_coord, H, W, dp_gauss_rgba.d);
-    //             bwd_diff(load_splat_alphablendv2)(dp_xyz_vs, dp_inv_cov_vs, dp_opacity, dp_gauss_rgb, dp_g.d);
+                // 计算字节偏移量
+                uint xyz_offset_x = g_idx * 12; // 3个float，每个4字节
+                uint xyz_offset_y = xyz_offset_x + 4;
+                uint xyz_offset_z = xyz_offset_x + 8;
 
-    //             // 计算字节偏移量
-    //             uint xyz_offset_x = g_idx * 12; // 3个float，每个4字节
-    //             uint xyz_offset_y = xyz_offset_x + 4;
-    //             uint xyz_offset_z = xyz_offset_x + 8;
+                uint inv_cov_offset_x = g_idx * 16; // 4个float，每个4字节
+                uint inv_cov_offset_y = inv_cov_offset_x + 4;
+                uint inv_cov_offset_z = inv_cov_offset_x + 8;
+                uint inv_cov_offset_w = inv_cov_offset_x + 12;
 
-    //             uint inv_cov_offset_x = g_idx * 16; // 4个float，每个4字节
-    //             uint inv_cov_offset_y = inv_cov_offset_x + 4;
-    //             uint inv_cov_offset_z = inv_cov_offset_x + 8;
-    //             uint inv_cov_offset_w = inv_cov_offset_x + 12;
+                uint opacity_offset = g_idx * 4; // 1个float，4字节
 
-    //             uint opacity_offset = g_idx * 4; // 1个float，4字节
+                uint rgb_offset_x = g_idx * 12; // 3个float，每个4字节
+                uint rgb_offset_y = rgb_offset_x + 4;
+                uint rgb_offset_z = rgb_offset_x + 8;
 
-    //             uint rgb_offset_x = g_idx * 12; // 3个float，每个4字节
-    //             uint rgb_offset_y = rgb_offset_x + 4;
-    //             uint rgb_offset_z = rgb_offset_x + 8;
+                // 使用NVAPI提供的浮点原子操作
+                // xyz_vs梯度
+                fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_x, dp_xyz_vs.d.x);
+                fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_y, dp_xyz_vs.d.y);
+                fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_z, dp_xyz_vs.d.z);
 
-    //             // 使用NVAPI提供的浮点原子操作
-    //             // xyz_vs梯度
-    //             fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_x, dp_xyz_vs.d.x);
-    //             fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_y, dp_xyz_vs.d.y);
-    //             fragment_parameter.grad_xyz_vs.InterlockedAddF32(xyz_offset_z, dp_xyz_vs.d.z);
+                // inv_cov_vs梯度
+                fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_x, dp_inv_cov_vs.d.x);
+                fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_y, dp_inv_cov_vs.d.y);
+                fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_z, dp_inv_cov_vs.d.z);
+                fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_w, dp_inv_cov_vs.d.w);
 
-    //             // inv_cov_vs梯度
-    //             fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_x, dp_inv_cov_vs.d.x);
-    //             fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_y, dp_inv_cov_vs.d.y);
-    //             fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_z, dp_inv_cov_vs.d.z);
-    //             fragment_parameter.grad_inv_cov_vs.InterlockedAddF32(inv_cov_offset_w, dp_inv_cov_vs.d.w);
+                // opacity梯度
+                fragment_parameter.grad_opacity.InterlockedAddF32(opacity_offset, dp_opacity.d);
 
-    //             // opacity梯度
-    //             fragment_parameter.grad_opacity.InterlockedAddF32(opacity_offset, dp_opacity.d);
-
-    //             // rgb梯度
-    //             fragment_parameter.grad_rgb.InterlockedAddF32(0, 10000.0f);
-    //             fragment_parameter.grad_rgb.InterlockedAddF32(rgb_offset_y, 10000.0f);
-    //             fragment_parameter.grad_rgb.InterlockedAddF32(rgb_offset_z, dp_gauss_rgb.d.z);
-    //         }
-    //     }
-    //     splats_left_to_process -= block_size;
-    // }
+                // rgb梯度
+                fragment_parameter.grad_rgb.InterlockedAddF32(rgb_offset_x, dp_gauss_rgb.d.x);
+                fragment_parameter.grad_rgb.InterlockedAddF32(rgb_offset_y, dp_gauss_rgb.d.y);
+                fragment_parameter.grad_rgb.InterlockedAddF32(rgb_offset_z, dp_gauss_rgb.d.z);
+            }
+        }
+        splats_left_to_process -= block_size;
+    }
 }
 
 [numthreads(TILE_WIDTH, TILE_HEIGHT, 1)]
@@ -271,11 +276,11 @@ void splat_tiled_backward_main(uint3 tid: SV_DispatchThreadID, uint3 groupthread
     uint32_t2 pix_coord = globalIdx.xy;
 
     uint32_t tile_idx = globalIdx.y / fragment_parameter.tile_height * fragment_parameter.grid_width + globalIdx.x / fragment_parameter.tile_width;
-    // uint32_t tile_idx_start = uint32_t(fragment_parameter.tile_ranges[tile_idx][0]);
-    // uint32_t tile_idx_end = uint32_t(fragment_parameter.tile_ranges[tile_idx][1]);
-    // fragment_parameter.tile_ranges_out[tile_idx] = int2(tile_idx_start, tile_idx_end);
-    uint32_t tile_idx_start = uint32_t(fragment_parameter.tile_ranges_out[tile_idx][0]);
-    uint32_t tile_idx_end = uint32_t(fragment_parameter.tile_ranges_out[tile_idx][1]);
+    uint32_t tile_idx_start = uint32_t(fragment_parameter.tile_ranges[tile_idx][0]);
+    uint32_t tile_idx_end = uint32_t(fragment_parameter.tile_ranges[tile_idx][1]);
+    fragment_parameter.tile_ranges_out[tile_idx] = int2(tile_idx_start, tile_idx_end);
+    // uint32_t tile_idx_start = uint32_t(fragment_parameter.tile_ranges_out[tile_idx][0]);
+    // uint32_t tile_idx_end = uint32_t(fragment_parameter.tile_ranges_out[tile_idx][1]);
     // 获取图像尺寸
     uint3 image_size;
     fragment_parameter.output_img.GetDimensions(image_size.x, image_size.y);
@@ -290,11 +295,11 @@ void splat_tiled_backward_main(uint3 tid: SV_DispatchThreadID, uint3 groupthread
         // 如果梯度为零，则跳过计算
         if (all(d_current_pixel_state == 0))
             return;
-        if (tile_idx_start == tile_idx_end && tile_idx_start == 0)
-        {
-            fragment_parameter.grad_rgb.InterlockedAddF32(8, 1.0f);
-            return;
-        }
+        // if (tile_idx_start == tile_idx_end && tile_idx_start == 0)
+        // {
+        //     fragment_parameter.grad_rgb.InterlockedAddF32(0, 1.0f);
+        //     return;
+        // }
         // 调用反向传播函数计算梯度
         bwd_alpha_blend(pix_coord,
                        tile_idx_start,

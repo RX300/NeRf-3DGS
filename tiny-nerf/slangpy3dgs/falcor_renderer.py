@@ -185,18 +185,20 @@ class FalcorGaussianRenderer:
         
         # 执行计算通道
         self.fragment_pass.execute(threads_x=width, threads_y=height)
-        
         # 等待Falcor处理结束
         self.device.render_context.wait_for_falcor()
         
         # 获取结果
+        n_contributors_numpy = n_contributors_texture.to_numpy()
         out_img = output_img_texture.to_numpy()
         # 转换为PyTorch张量
         out_img_torch = torch.from_numpy(out_img).to("cuda")
-        
-        return out_img_torch
+        print(n_contributors_numpy.dtype)
+        n_contributors_numpy = n_contributors_numpy.astype(np.uint32)
+        n_contributors_torch = torch.from_numpy(n_contributors_numpy).to("cuda")
+        return out_img_torch,out_img,n_contributors_torch
 
-    def backward_fragment_render(self, sorted_gauss_idx, tile_ranges, xyz_vs, inv_cov_vs, opacity, rgb, 
+    def backward_fragment_render(self, sorted_gauss_idx, tile_ranges,rendered_image_texture,n_contributors_torch, xyz_vs, inv_cov_vs, opacity, rgb, 
                                 grad_output, width, height, grid_height, grid_width):
         """执行反向传播计算梯度"""
         # 创建输入缓冲区
@@ -206,12 +208,11 @@ class FalcorGaussianRenderer:
         opacity_buffer = self.create_buffer(4, opacity.shape[0], torch_tensor=opacity)
         rgb_buffer = self.create_buffer(12, rgb.shape[0], torch_tensor=rgb)
         tile_ranges_buffer = self.create_buffer(8, tile_ranges.shape[0], torch_tensor=tile_ranges)
-        # 创建输出图像纹理
-        output_img_numpy = np.zeros((height, width, 4), dtype=np.float32)
-        output_img_texture = self.create_texture(width, height, data=output_img_numpy)
+        # 创建前向过程中输出的图像纹理
+        output_img_texture = self.create_texture(width, height, data=rendered_image_texture)
         
         # 创建n_contributors纹理
-        n_contributors_numpy = np.zeros((height, width), dtype=np.uint32)
+        n_contributors_numpy = n_contributors_torch.cpu().numpy()
         n_contributors_texture = self.create_texture(
             width, height, 
             format=falcor.ResourceFormat.R32Uint, 
@@ -292,12 +293,12 @@ class FalcorGaussianRenderer:
         grad_opacity = grad_opacity_buffer.to_torch([N], falcor.float32)
         grad_rgb = grad_rgb_buffer.to_torch([N, 3], falcor.float32)
         tile_ranges = tile_ranges_buffer.to_torch([grid_width*grid_height, 2], falcor.int32)
-        print(f"tile_ranges.mean(): {tile_ranges[:50,:].float().mean(dim=0)}")
-        print(f"grad_rgb.mean: {grad_rgb.mean(dim=0)}")
-        grad_test = grad_test_buffer.to_torch([1], falcor.float32)
-        print(f"grad_test: {grad_test}")
-        self.device.render_context.wait_for_cuda()
-        exit()
+        # print(f"tile_ranges.mean(): {tile_ranges[:50,:].float().mean(dim=0)}")
+        # print(f"grad_rgb.mean: {grad_rgb.mean(dim=0)}")
+        # grad_test = grad_test_buffer.to_torch([1], falcor.float32)
+        # print(f"grad_test: {grad_test}")
+        # self.device.render_context.wait_for_cuda()
+        # exit()
         return grad_xyz_vs, grad_inv_cov_vs, grad_opacity, grad_rgb
 
 
@@ -324,26 +325,27 @@ class GaussianRenderFunction(Function):
         out_tile_ranges, tile_ranges_buffer = renderer.compute_tile_ranges(sorted_keys, grid_height, grid_width)
         
         # 执行片段渲染
-        rendered_image = renderer.fragment_render(
+        rendered_image_torch,rendered_image_texture,n_contributors_torch = renderer.fragment_render(
             sorted_gauss_idx, tile_ranges_buffer, xyz_vs, inv_cov_vs, opacity, rgb, 
             width, height, grid_height, grid_width
         )
         
         # 保存上下文信息用于反向传播
-        ctx.save_for_backward(xyz_vs, inv_cov_vs, opacity, rgb, sorted_gauss_idx, out_tile_ranges)
+        ctx.save_for_backward(xyz_vs, inv_cov_vs, opacity, rgb, sorted_gauss_idx, out_tile_ranges,n_contributors_torch)
         ctx.renderer = renderer
         ctx.width = width
         ctx.height = height
         ctx.grid_width = grid_width
         ctx.grid_height = grid_height
-        
-        return rendered_image
+        ctx.rendered_image_texture = rendered_image_texture
+
+        return rendered_image_torch
     
     @staticmethod
     def backward(ctx, grad_output):
         """反向传播：计算参数的梯度"""
         # 获取保存的张量
-        xyz_vs, inv_cov_vs, opacity, rgb, sorted_gauss_idx, out_tile_ranges = ctx.saved_tensors
+        xyz_vs, inv_cov_vs, opacity, rgb, sorted_gauss_idx, out_tile_ranges,n_contributors_torch = ctx.saved_tensors
         print(f"backward:out_tile_ranges.mean(): {out_tile_ranges[:50,:].float().mean(dim=0)}")
         # 获取渲染器和其他参数
         renderer = ctx.renderer
@@ -351,10 +353,12 @@ class GaussianRenderFunction(Function):
         height = ctx.height
         grid_width = ctx.grid_width
         grid_height = ctx.grid_height
-        
+        rendered_image_texture = ctx.rendered_image_texture
+        print(f"grad_output.shape: {grad_output.shape}")
+        print(f"grad_output.mean: {grad_output.reshape(-1,4).mean(dim=0)}")
         # 计算梯度
         grad_xyz_vs, grad_inv_cov_vs, grad_opacity, grad_rgb = renderer.backward_fragment_render(
-            sorted_gauss_idx, out_tile_ranges, xyz_vs, inv_cov_vs, opacity, rgb,
+            sorted_gauss_idx, out_tile_ranges,rendered_image_texture,n_contributors_torch, xyz_vs, inv_cov_vs, opacity, rgb,
             grad_output, width, height, grid_height, grid_width
         )
         # 打印梯度
@@ -362,6 +366,7 @@ class GaussianRenderFunction(Function):
         print(f"grad_inv_cov_vs.mean: {grad_inv_cov_vs.mean(dim=0)}")
         print(f"grad_opacity.mean: {grad_opacity.mean()}")
         print(f"grad_rgb.mean: {grad_rgb.mean(dim=0)}")
+        exit()
         # 返回与forward参数数量一致的梯度
         return (None,                # renderer
                 grad_xyz_vs,         # xyz_vs
