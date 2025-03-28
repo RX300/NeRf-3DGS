@@ -39,11 +39,11 @@ rectangle get_rectangle_tile_space(
 void preprocess_shader(
     // 输入参数
     no_diff int32_t g_idx,                  // 高斯点索引
-    float3 xyz_ws,                          // 世界空间中高斯点的位置
-    float[48] sh_coeffs,                    // 球谐系数
-    inout float opacity,                          // 不透明度
-    float4 rotations,                       // 旋转四元数
-    float3 scales,                          // 缩放系数
+    in float3 xyz_ws,                       // 世界空间中高斯点的位置
+    in float[48] sh_coeffs,                 // 球谐系数
+    inout float opacity,                    // 不透明度
+    in float4 rotations,                    // 旋转四元数
+    in float3 scales,                       // 缩放系数
     no_diff uint active_sh,                 // 活动的球谐阶数
     no_diff float scale_modifier,           // 缩放修正系数
     no_diff float[16] world_view_transform, // 世界到视图变换矩阵
@@ -56,17 +56,17 @@ void preprocess_shader(
     no_diff bool prefiltered,               // 是否预过滤
     no_diff bool antialiasing,              // 是否抗锯齿
     // 输出参数
-    out no_diff int32_t out_radii, // 输出半径
-    out float3 out_xyz_ndc,        // 输出ndc空间位置
-    out float out_depths,          // 输出深度
-    out float[6] out_cov3Ds,       // 输出3D协方差矩阵
-    out float3 out_rgb,            // 输出RGB颜色
-    out float4 out_inv_cov_vs,     // 输出视图空间逆协方差矩阵
-    out no_diff int32_t out_tiles_touched, // 输出触及的瓦片数
-    out no_diff int32_t4 out_rect_tile_space, // 输出瓦片区域
-    out float2 pixelspace_uv, // 输出像素空间坐标
-    out float3 testPointsVS,          // 输出测试点
-    out float4 p_hom_test,              // 输出测试点
+    inout no_diff int32_t out_radii,              // 输出半径
+    out float3 out_xyz_ndc,                     // 输出ndc空间位置
+    out float out_depths,                       // 输出深度
+    out float[6] out_cov3Ds,                    // 输出3D协方差矩阵
+    out float3 out_rgb,                         // 输出gaussian的RGB颜色
+    out float4 out_inv_cov_vs,                  // 输出视图空间逆协方差矩阵
+    inout no_diff int32_t out_tiles_touched,      // 输出触及的瓦片数
+    inout no_diff int32_t4 out_rect_tile_space, // 输出瓦片区域
+    inout no_diff float2 pixelspace_uv,         // 输出像素空间坐标
+    inout no_diff float3 testPointsVS,          // 输出测试点
+    inout no_diff float4 p_hom_test,              // 输出测试点
 )
 {
     // uint32_t g_idx = cudaBlockIdx().x * cudaBlockDim().x + cudaThreadIdx().x;
@@ -150,7 +150,7 @@ void preprocess_shader(
         ndc2pix(splat.xyz_vs.x, image_width),
         ndc2pix(splat.xyz_vs.y, image_height)
     };
-    pixelspace_uv = pixelspace_xy;
+    pixelspace_uv = detach(pixelspace_xy);
     // 计算高斯覆盖的tile区域,用矩形表示
     rectangle rect_tile_space = get_rectangle_tile_space(
         pixelspace_xy,
@@ -204,7 +204,7 @@ void preprocess_shader(
 
     // 存储2D逆协方差矩阵
     out_inv_cov_vs = float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][0], inv_cov_vs[1][1]);
-    p_hom_test = float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][1], opacity*h_convolution_scaling);
+    p_hom_test = detach(float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][1], opacity*h_convolution_scaling));
 
     // 存储RGB颜色（应用h_convolution_scaling）
     opacity *= h_convolution_scaling; // 在完整实现中，应该使用实际的不透明度

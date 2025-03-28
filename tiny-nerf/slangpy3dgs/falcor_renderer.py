@@ -366,7 +366,7 @@ class GaussianRenderFunction(Function):
         print(f"grad_inv_cov_vs.mean: {grad_inv_cov_vs.mean(dim=0)}")
         print(f"grad_opacity.mean: {grad_opacity.mean()}")
         print(f"grad_rgb.mean: {grad_rgb.mean(dim=0)}")
-        exit()
+        #exit()
         # 返回与forward参数数量一致的梯度
         return (None,                # renderer
                 grad_xyz_vs,         # xyz_vs

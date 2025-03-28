@@ -281,6 +281,7 @@ class GaussianSplatting:
         opacity = torch.sigmoid(self.opacities)  # Apply activation to opacities
         # 1. 确保参数形状正确
         means3Dslang = means3D.contiguous().clone().detach().requires_grad_(True)
+        self.means3Dslang = means3Dslang
         scalesslang = scales.contiguous().clone().detach().requires_grad_(True)
         rotationsslang = rotations.contiguous().clone().detach().requires_grad_(True)
         # 将out_opacity = opacity.contiguous().squeeze()复制到 新的tensor：out_opcity上
@@ -371,7 +372,12 @@ class GaussianSplatting:
             testPointsVS,
             p_hom_test
         )
-        means3Dhomogeneous = torch.cat((means3D, torch.ones(N, 1, device=device)), dim=1)
+        # out_xyz_vs_gt = torch.ones_like(out_xyz_vs)
+        # loss_xyz_vs = (out_xyz_vs_gt - out_xyz_vs).mean()
+        # loss_xyz_vs.backward()
+        # exit()
+
+        # means3Dhomogeneous = torch.cat((means3Dslang, torch.ones(N, 1, device=device)), dim=1)
         # gtPointsVS = torch.matmul(means3Dhomogeneous, world_view_transform.T)
         # print(f"gtPointsVS:{gtPointsVS.mean(dim=0)}")
         # print(f"testPointsVS:{testPointsVS.mean(dim=0)}")
@@ -386,7 +392,7 @@ class GaussianSplatting:
         print(f"out_opcity:{out_opacity.mean()}")
         print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
         print(f"out_tiles_touched:{out_tiles_touched.mean()}")
-        out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
+        # out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
         index_buffer_offset = np.cumsum((out_tiles_touched), dtype=np.int32)
         print(f"num_threads:{index_buffer_offset[-1]}")
 
@@ -405,37 +411,37 @@ class GaussianSplatting:
         print(rendered_image_falcor.shape)
         print(f"rendered_image_falcor.mean:{rendered_image_falcor.reshape(-1,4).mean(dim=0)}")
 
-        # Render
-        rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
-            means3D=means3D,
-            means2D=screenspace_points,
-            shs=shs,  # Using spherical harmonics
-            colors_precomp=None,  # Not using precomputed colors
-            opacities=opacity,
-            scales=scales, 
-            rotations=rotations,
-            cov3D_precomp=None  # Will be computed from scales and rotations
-        )
-        print(f"======================gt==========================")
-        # print(f"meanshomo.shape:{meanshomo.shape}")
-        # print(f"meanshomo:{meanshomo.mean(dim=0)}")
-        print(f"means2D.shape:{means2D.shape}")
-        print(f"means2D:{means2D.mean(dim=0)}")
-        print(f"radii.shape:{radii.shape}")
-        print(f"radii:{radii.float().mean()}")
-        #对每个invdepth求倒数
-        depths = 1.0 / invdepths
-        print(f"invdepths.shape:{invdepths.shape}")
-        print(f"invdepths:{invdepths.mean()}")
-        print(f"depths:{depths.mean()}")
-        print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
-        print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
-        print(f"rendered_image.mean:{rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
-        # [C H W] => [H W C]
-        rendered_image = rendered_image.permute(1, 2, 0).contiguous()
-        rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
+        # # Render
+        # print(f"======================gt==========================")
+        # rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
+        #     means3D=means3D,
+        #     means2D=screenspace_points,
+        #     shs=shs,  # Using spherical harmonics
+        #     colors_precomp=None,  # Not using precomputed colors
+        #     opacities=opacity,
+        #     scales=scales, 
+        #     rotations=rotations,
+        #     cov3D_precomp=None  # Will be computed from scales and rotations
+        # )
+        # # print(f"meanshomo.shape:{meanshomo.shape}")
+        # # print(f"meanshomo:{meanshomo.mean(dim=0)}")
+        # print(f"means2D.shape:{means2D.shape}")
+        # print(f"means2D:{means2D.mean(dim=0)}")
+        # print(f"radii.shape:{radii.shape}")
+        # print(f"radii:{radii.float().mean()}")
+        # #对每个invdepth求倒数
+        # depths = 1.0 / invdepths
+        # print(f"invdepths.shape:{invdepths.shape}")
+        # print(f"invdepths:{invdepths.mean()}")
+        # print(f"depths:{depths.mean()}")
+        # print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
+        # print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
+        # print(f"rendered_image.mean:{rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
+        # # [C H W] => [H W C]
+        # rendered_image = rendered_image.permute(1, 2, 0).contiguous()
+        # rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
 
-        return rendered_image,rendered_image_falcor
+        return rendered_image_falcor,rendered_image_falcor
     
     def debug_image_values(self, rendered_image):
         # Check for NaNs or Infs
@@ -498,13 +504,15 @@ class GaussianSplatting:
                     self.debug_image_values(rendered_image)
 
                 # Compute loss (MSE)
-                gt_image_reshaped = gt_image.reshape(-1, 3)
-                rendered_image_reshaped = rendered_image.reshape(-1, 3)
-                loss = mse(rendered_image, gt_image)
+                # gt_image_reshaped = gt_image.reshape(-1, 3)
+                # rendered_image_reshaped = rendered_image.reshape(-1, 3)
+                # loss = mse(rendered_image, gt_image)
                 loss_falcor = mse(render_image_with_diff_raster[:,:,:3], gt_image)
                 # Backward pass
-                loss.backward()
+                # loss.backward()
                 loss_falcor.backward()
+                print(self.means3Dslang.grad.mean(dim=0))
+                exit()
                 # print self.xyz.grad
                 print(f"grad:{self.means.grad.mean(dim=0)}")
                 #self.gaussians.optimizer.step()
