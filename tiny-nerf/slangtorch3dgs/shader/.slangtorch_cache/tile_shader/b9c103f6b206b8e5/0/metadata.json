@@ -1,0 +1,58 @@
+{
+    "cpp": {
+        "options": [],
+        "deps": [
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\tile_shader.slang",
+                1743237302.5733068
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\utils.slang",
+                1743233912.36969
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\spherical_harmonics.slang",
+                1743233912.3686948
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slangc.exe",
+                1740319138.051763
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slang.dll",
+                1740319138.0458221
+            ]
+        ],
+        "version": "1.3.4",
+        "includePaths": []
+    },
+    "cuda": {
+        "options": [],
+        "deps": [
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\tile_shader.slang",
+                1743237302.5733068
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\utils.slang",
+                1743233912.36969
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\spherical_harmonics.slang",
+                1743233912.3686948
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slangc.exe",
+                1740319138.051763
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slang.dll",
+                1740319138.0458221
+            ]
+        ],
+        "version": "1.3.4",
+        "includePaths": []
+    },
+    "moduleName": "_slangtorch_tile_shader_b9c103f6b206b8e5",
+    "moduleBinary": "d:\\A_study\\nerf3dgs\\tiny-nerf\\slangtorch3dgs\\shader\\.slangtorch_cache\\tile_shader\\b9c103f6b206b8e5\\0\\_slangtorch_tile_shader_b9c103f6b206b8e5.pyd"
+}

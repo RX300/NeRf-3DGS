@@ -12,39 +12,7 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
 from internal.alphablend_tiled_slang import render_alpha_blend_tiles_slang_raw
-
-def render_slangtorch(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None):
-  """ Implements the Interface defined in the inria code-base."""
-  assert scaling_modifier == 1.0, "scaling_modifier is not supported in the slang-gaussian-rasterization."
-  assert override_color is None, "override_color is not support in the slang-gaussian-rasterization."
-  assert pipe.convert_SHs_python is False, "convert_SHs_python is not supported."
-  assert pipe.compute_cov3D_python is False, "compute_cov3D_python is not supported."
-  assert pipe.debug is False, "debug mode is not supported."
-  assert torch.equal(bg_color, torch.zeros_like(bg_color)), "only black background is supported currently."
-
-  active_sh = pc.active_sh_degree
-  xyz_ws, rotations, scales, sh_coeffs, opacity = common_properties_from_inria_GaussianModel(pc)
-  world_view_transform, proj_mat, cam_pos, fovy, fovx, height, width = common_properties_from_inria_Camera(viewpoint_camera)  
-
-
-  render_pkg = render_alpha_blend_tiles_slang_raw(xyz_ws, rotations, scales, opacity, 
-                                                  sh_coeffs, active_sh,
-                                                  world_view_transform, proj_mat, cam_pos,
-                                                  fovy, fovx, height, width)
-  
-  return render_pkg
-
-# Import the diff_gaussian_rasterization module
-try:
-    from diff_gaussian_rasterization import (
-        GaussianRasterizationSettings, 
-        GaussianRasterizer
-    )
-    DIFF_RASTER_AVAILABLE = True
-except ImportError:
-    DIFF_RASTER_AVAILABLE = False
-    print("WARNING: diff_gaussian_rasterization module not found. Please install it first:")
-    print("pip install submodules/diff-gaussian-rasterization")
+import falcor_renderer
 
 # Set the random seeds for reproducibility
 np.random.seed(42)
@@ -143,16 +111,14 @@ class GaussianSplatting:
         self.num_gaussians = num_gaussians
         self.learning_rate = learning_rate
         
-        if not DIFF_RASTER_AVAILABLE:
-            raise ImportError("diff_gaussian_rasterization is required but not available.")
-        
         # Define SH degree and coefficients
         self.sh_degree = 3  # 3rd order spherical harmonics
         self.sh_dim = (self.sh_degree + 1) ** 2  # Number of SH coefficients
         
         # Load the NeRF dataset
         self.load_nerf_data('tiny_nerf_data.npz')
-        
+        # Load Falcor renderer
+        self.renderer = falcor_renderer.GSRenderer(self.height,self.width,16,16)
         # Initialize Gaussian parameters
         self.xyz = torch.empty(0)
         self.scales = torch.empty(0)
@@ -325,36 +291,12 @@ class GaussianSplatting:
         near = 0.01
         far = 5
         fov = focal2fov(self.focal, width)
-        tanfovx = math.tan(fov * 0.5)
-        tanfovy = math.tan(fov * 0.5)
+
         projection_matrix = getProjectionMatrix(near, far, fov, fov).transpose(0,1).to(device)
         full_proj_transform = (world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
         camera_center = world_view_transform.inverse()[3, :3]
         # Background color
         bg_color = torch.tensor([0,0,0],dtype=torch.float32,device=device,requires_grad=False)  # White background
-        
-        # Create rasterization settings
-        raster_settings = GaussianRasterizationSettings(
-            image_height=int(height),
-            image_width=int(width),
-            tanfovx=tanfovx,
-            tanfovy=tanfovy,
-            bg=bg_color,
-            scale_modifier=scaling_modifier,
-            viewmatrix=world_view_transform,
-            projmatrix=full_proj_transform,
-            sh_degree=3,  # Using 3rd order SH
-            campos=camera_center,
-            prefiltered=False,
-            debug=False,
-            antialiasing=True
-        )
-        
-        # Create rasterizer
-        rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-        
-        # Create a dummy screenspace tensor for gradients
-        screenspace_points = torch.zeros_like(self.means, device=device, requires_grad=True)+0
 
         # Get parameters for rasterization
         means3D = torch.ones_like(self.means) * self.means
@@ -364,19 +306,7 @@ class GaussianSplatting:
         #这里一定要在每次训练前重新拼接sh_coeffs
         shs = torch.cat((self.features_dc, self.features_rest), dim=1)
 
-        # # Render
-        # rendered_image, radii, invdepths = rasterizer(
-        #     means3D=means3D,
-        #     means2D=screenspace_points,
-        #     shs=shs,  # Using spherical harmonics
-        #     colors_precomp=None,  # Not using precomputed colors
-        #     opacities=opacity,
-        #     scales=scales, 
-        #     rotations=rotations,
-        #     cov3D_precomp=None  # Will be computed from scales and rotations
-        # )
-        # 使用 render_alpha_blend_tiles_slang_raw 进行渲染
-        rendered_image = render_alpha_blend_tiles_slang_raw(
+        rendered_image = self.renderer.run_shader(
             xyz_ws=means3D,
             rotations=rotations,
             scales=scales,
@@ -388,9 +318,9 @@ class GaussianSplatting:
             cam_pos=camera_center,
             fovy=fov,
             fovx=fov,
-            height=int(height),
-            width=int(width)
-        )['render']
+        )
+        # print(f"rendered_image.shape: {rendered_image.shape}")
+        # print(f"rendered_image_means: {rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
         rendered_image = rendered_image.permute(1, 2, 0).contiguous()
         rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
         return rendered_image
@@ -587,10 +517,6 @@ def check_and_install_diff_gaussian_rasterization():
 if __name__ == "__main__":
     import os
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-    # Check if diff_gaussian_rasterization is installed
-    if not check_and_install_diff_gaussian_rasterization():
-        print("Failed to install diff_gaussian_rasterization. Please install manually.")
-        exit(1)
     
     # Create Gaussian Splatting model
     model = GaussianSplatting(num_gaussians=100000, learning_rate=1e-3)
