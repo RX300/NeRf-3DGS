@@ -131,7 +131,7 @@ class GaussianSplatting:
         self.sh_dim = (self.sh_degree + 1) ** 2  # Number of SH coefficients
         
         # Load the NeRF dataset
-        self.load_nerf_data('../tiny_nerf_data.npz')
+        self.load_nerf_data('tiny_nerf_data.npz')
         # Create an SGL device with the local folder for slangpy includes
         sgldevice = spy.create_device(include_paths=[
                 pathlib.Path(__file__).parent.absolute(),
@@ -218,8 +218,10 @@ class GaussianSplatting:
         self.features_rest = nn.Parameter(data=torch.zeros(self.num_gaussians, (self.sh_degree+1)**2-1, 3, device=device), requires_grad=True)   
     
     def initialize_falcor(self):
+        grid_width = (self.width + 15) // 16
+        grid_height = (self.height + 15) // 16
         # 替换原来的 initialize_falcor
-        self.falcor_renderer = FalcorGaussianRenderer()
+        self.falcor_renderer = FalcorGaussianRenderer(self.num_gaussians,self.width,self.height,grid_width,grid_height)
         self.testbed = self.falcor_renderer.testbed
         self.falcordevice = self.falcor_renderer.device
     def render_image_with_diff_raster(self, camera_pose, height=None, width=None, scaling_modifier=1.0):
@@ -280,12 +282,11 @@ class GaussianSplatting:
         rotations = torch.nn.functional.normalize(self.rotations)  # Ensure unit quaternions
         opacity = torch.sigmoid(self.opacities)  # Apply activation to opacities
         # 1. 确保参数形状正确
-        means3Dslang = means3D.contiguous().clone().detach().requires_grad_(True)
-        self.means3Dslang = means3Dslang
-        scalesslang = scales.contiguous().clone().detach().requires_grad_(True)
-        rotationsslang = rotations.contiguous().clone().detach().requires_grad_(True)
-        # 将out_opacity = opacity.contiguous().squeeze()复制到 新的tensor：out_opcity上
-        out_opacity = opacity.contiguous().squeeze().clone().detach().requires_grad_(True)
+        # means3Dslang = means3D.contiguous().clone().requires_grad_(True)
+        # self.means3Dslang = means3Dslang
+        # scalesslang = scales.contiguous().clone().requires_grad_(True)
+        # rotationsslang = rotations.contiguous().clone().requires_grad_(True)
+        out_opacity = opacity.contiguous().squeeze().clone().requires_grad_(True)
         # 2. 将世界视图变换矩阵转为合适格式
         world_view_transform = world_view_transform.float().contiguous()
         full_proj_transform = full_proj_transform.float().contiguous()
@@ -298,8 +299,8 @@ class GaussianSplatting:
         out_cov3Ds = torch.zeros(N, 6, dtype=torch.float32, device=device)  # 3x3 对称矩阵的上三角部分
         out_rgb = torch.zeros(N, 3, dtype=torch.float32, device=device)
         out_inv_cov_vs = torch.zeros(N, 4, dtype=torch.float32, device=device)
-        out_rect_tile_space = np.zeros(shape=(N, 4), dtype=np.int32, device='cpu')
-        out_tiles_touched = np.zeros(shape=(N), dtype=np.int32, device='cpu')
+        out_rect_tile_space = np.ones(shape=(N, 4), dtype=np.int32, device='cpu')
+        out_tiles_touched = np.ones(shape=(N), dtype=np.int32, device='cpu')
         out_pixels_xy = torch.zeros(size=(N, 2), dtype=torch.float32, device=device)
         testPointsVS = torch.ones(N, 3, dtype=torch.float32, device=device)
         p_hom_test = torch.zeros(N, 4, dtype=torch.float32, device=device)
@@ -311,44 +312,26 @@ class GaussianSplatting:
         #这里一定要在每次训练前重新拼接sh_coeffs
         # shs.shape => [num_gaussians, sh_dim, 3]
         shs = torch.cat((self.features_dc, self.features_rest), dim=1)
+        shs_array = shs.reshape(self.num_gaussians, -1)
         shsslang = shs.contiguous().clone().detach().requires_grad_(True)
         # gaussian = torch.ones(size=(100000,48), dtype=torch.float32, device='cuda', requires_grad=True)
         # print(shs.shape)
         # self.utilsmodule.testNdArray(shs.reshape(self.num_gaussians,-1))
 
-        # self.shadermodule.preprocess_shader_release(
-        #     spy.thread_id(),                    # g_idx - 线程ID
-        #     means3D,                            # xyz_ws - 世界空间中高斯点的位置
-        #     shs.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
-        #     out_opacity,                            # opacities - 不透明度
-        #     rotations,                          # rotations - 旋转四元数
-        #     scales,                             # scales - 缩放系数
-        #     3,                                  # active_sh - 活动的球谐阶数
-        #     1.0,                                # scale_modifier - 缩放修正系数
-        #     world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
-        #     projection_matrix.T.reshape(-1),                # proj_mat - 投影矩阵
-        #     camera_center,                      # cam_pos - 相机位置
-        #     fov,                                # fovy - 视场角y
-        #     fov,                                # fovx - 视场角x
-        #     int(height),                        # image_height - 图像高度
-        #     int(width),                         # image_width - 图像宽度
-        #     False,                              # prefiltered - 是否预过滤
-        #     True,                                # antialiasing - 是否抗锯齿
-        #     out_radii,                          # 输出半径
-        #     out_xyz_vs,                         # 输出视图空间位置  
-        #     out_cov3Ds,                         # 输出3D协方差矩阵
-        #     out_rgb,                            # 输出RGB颜色
-        #     out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
-        #     out_tiles_touched,                   # 输出触及的瓦片数
-        #     out_rect_tile_space                # 输出矩形瓦片空间
-        # )
-        self.shadermodule.preprocess_shader(
+        self.shadermodule.preprocess_shader_release(
             spy.thread_id(),                    # g_idx - 线程ID
-            means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
-            shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+            means3D,                            # xyz_ws - 世界空间中高斯点的位置
+            shs_array,                          # sh_coeffs - 球谐系数
             out_opacity,                            # opacities - 不透明度
-            rotationsslang,                          # rotations - 旋转四元数
-            scalesslang,                             # scales - 缩放系数
+            rotations,                          # rotations - 旋转四元数
+            scales,                             # scales - 缩放系数
+
+            # means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
+            # shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+            # out_opacity,                            # opacities - 不透明度
+            # rotationsslang,                          # rotations - 旋转四元数
+            # scalesslang,                             # scales - 缩放系数
+
             3,                                  # active_sh - 活动的球谐阶数
             1.0,                                # scale_modifier - 缩放修正系数
             world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
@@ -362,39 +345,68 @@ class GaussianSplatting:
             True,                                # antialiasing - 是否抗锯齿
             out_radii,                          # 输出半径
             out_xyz_vs,                         # 输出视图空间位置  
-            out_depths,                         # 输出深度
             out_cov3Ds,                         # 输出3D协方差矩阵
             out_rgb,                            # 输出RGB颜色
             out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
             out_tiles_touched,                   # 输出触及的瓦片数
-            out_rect_tile_space,                # 输出矩形瓦片空间
-            out_pixels_xy,                      # 输出像素坐标
-            testPointsVS,
-            p_hom_test
+            out_rect_tile_space                # 输出矩形瓦片空间
         )
-        # out_xyz_vs_gt = torch.ones_like(out_xyz_vs)
-        # loss_xyz_vs = (out_xyz_vs_gt - out_xyz_vs).mean()
-        # loss_xyz_vs.backward()
-        # exit()
+        # self.shadermodule.preprocess_shader(
+        #     spy.thread_id(),                    # g_idx - 线程ID
+        #     means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
+        #     shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+        #     out_opacity,                            # opacities - 不透明度
+        #     rotationsslang,                          # rotations - 旋转四元数
+        #     scalesslang,                             # scales - 缩放系数
+        #     3,                                  # active_sh - 活动的球谐阶数
+        #     1.0,                                # scale_modifier - 缩放修正系数
+        #     world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
+        #     projection_matrix.T.reshape(-1),                # proj_mat - 投影矩阵
+        #     camera_center,                      # cam_pos - 相机位置
+        #     fov,                                # fovy - 视场角y
+        #     fov,                                # fovx - 视场角x
+        #     int(height),                        # image_height - 图像高度
+        #     int(width),                         # image_width - 图像宽度
+        #     False,                              # prefiltered - 是否预过滤
+        #     True,                                # antialiasing - 是否抗锯齿
+        #     out_radii,                          # 输出半径
+        #     out_xyz_vs,                         # 输出视图空间位置  
+        #     out_depths,                         # 输出深度
+        #     out_cov3Ds,                         # 输出3D协方差矩阵
+        #     out_rgb,                            # 输出RGB颜色
+        #     out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
+        #     out_tiles_touched,                   # 输出触及的瓦片数
+        #     out_rect_tile_space,                # 输出矩形瓦片空间
+        #     out_pixels_xy,                      # 输出像素坐标
+        #     testPointsVS,
+        #     p_hom_test
+        # )
+        # # out_xyz_vs_gt = torch.ones_like(out_xyz_vs)
+        # # loss_xyz_vs = (out_xyz_vs_gt - out_xyz_vs).mean()
+        # # loss_xyz_vs.backward()
+        # # exit()
 
-        # means3Dhomogeneous = torch.cat((means3Dslang, torch.ones(N, 1, device=device)), dim=1)
-        # gtPointsVS = torch.matmul(means3Dhomogeneous, world_view_transform.T)
-        # print(f"gtPointsVS:{gtPointsVS.mean(dim=0)}")
-        # print(f"testPointsVS:{testPointsVS.mean(dim=0)}")
-        # meansHomo = torch.matmul(means3Dhomogeneous, full_proj_transform)
-        print(f"out_xyz_vs:{out_xyz_vs.mean(dim=0)}")
-        # print(f"meansHomo:{meansHomo.mean(dim=0)}")
-        print(f"out_pixels_xy:{out_pixels_xy.mean(dim=0)}")
-        print(f"conic:{p_hom_test.mean(dim=0)}")
-        print(f"out_radii:{out_radii.mean()}")
-        print(f"out_depths:{out_depths.mean()}")
-        print(f"out_rgb:{out_rgb.mean(dim=0)}")
-        print(f"out_opcity:{out_opacity.mean()}")
-        print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
-        print(f"out_tiles_touched:{out_tiles_touched.mean()}")
-        # out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
+        # # means3Dhomogeneous = torch.cat((means3Dslang, torch.ones(N, 1, device=device)), dim=1)
+        # # gtPointsVS = torch.matmul(means3Dhomogeneous, world_view_transform.T)
+        # # print(f"gtPointsVS:{gtPointsVS.mean(dim=0)}")
+        # # print(f"testPointsVS:{testPointsVS.mean(dim=0)}")
+        # # meansHomo = torch.matmul(means3Dhomogeneous, full_proj_transform)
+        # print(f"out_xyz_vs:{out_xyz_vs.mean(dim=0)}")
+        # # print(f"meansHomo:{meansHomo.mean(dim=0)}")
+        # print(f"out_pixels_xy:{out_pixels_xy.mean(dim=0)}")
+        # print(f"conic:{p_hom_test.mean(dim=0)}")
+        # print(f"out_radii:{out_radii.mean()}")
+        # print(f"out_depths:{out_depths.mean()}")
+        # print(f"out_rgb:{out_rgb.mean(dim=0)}")
+        # print(f"out_opcity:{out_opacity.mean()}")
+        # print(f"out_inv_cov_vs:{out_inv_cov_vs.mean(dim=0)}")
+        # print(f"out_tiles_touched:{out_tiles_touched.mean()}")
+        # # out_xyz_vs_numpy = out_xyz_vs.cpu().detach().numpy()
+        
         index_buffer_offset = np.cumsum((out_tiles_touched), dtype=np.int32)
         print(f"num_threads:{index_buffer_offset[-1]}")
+        print(f"index_buffer_offset.shape:{index_buffer_offset.shape}")
+        # # exit()
 
         print(f"======================falcor==========================")
         rendered_image_falcor = render_gaussian_image(
@@ -411,36 +423,39 @@ class GaussianSplatting:
         print(rendered_image_falcor.shape)
         print(f"rendered_image_falcor.mean:{rendered_image_falcor.reshape(-1,4).mean(dim=0)}")
 
-        # # Render
-        # print(f"======================gt==========================")
-        # rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
-        #     means3D=means3D,
-        #     means2D=screenspace_points,
-        #     shs=shs,  # Using spherical harmonics
-        #     colors_precomp=None,  # Not using precomputed colors
-        #     opacities=opacity,
-        #     scales=scales, 
-        #     rotations=rotations,
-        #     cov3D_precomp=None  # Will be computed from scales and rotations
-        # )
-        # # print(f"meanshomo.shape:{meanshomo.shape}")
-        # # print(f"meanshomo:{meanshomo.mean(dim=0)}")
-        # print(f"means2D.shape:{means2D.shape}")
-        # print(f"means2D:{means2D.mean(dim=0)}")
-        # print(f"radii.shape:{radii.shape}")
-        # print(f"radii:{radii.float().mean()}")
-        # #对每个invdepth求倒数
-        # depths = 1.0 / invdepths
-        # print(f"invdepths.shape:{invdepths.shape}")
-        # print(f"invdepths:{invdepths.mean()}")
-        # print(f"depths:{depths.mean()}")
-        # print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
-        # print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
-        # print(f"rendered_image.mean:{rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
-        # # [C H W] => [H W C]
-        # rendered_image = rendered_image.permute(1, 2, 0).contiguous()
-        # rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
-
+        # Render
+        print(f"======================gt==========================")
+        rendered_image, radii, invdepths,means2D,meanshomo,conic_opacity,tiles_touched = rasterizer(
+            means3D=means3D,
+            means2D=screenspace_points,
+            shs=shs,  # Using spherical harmonics
+            colors_precomp=None,  # Not using precomputed colors
+            opacities=opacity,
+            scales=scales, 
+            rotations=rotations,
+            cov3D_precomp=None  # Will be computed from scales and rotations
+        )
+        # print(f"meanshomo.shape:{meanshomo.shape}")
+        # print(f"meanshomo:{meanshomo.mean(dim=0)}")
+        print(f"means2D.shape:{means2D.shape}")
+        print(f"means2D:{means2D.mean(dim=0)}")
+        print(f"radii.shape:{radii.shape}")
+        print(f"radii:{radii.float().mean()}")
+        #对每个invdepth求倒数
+        depths = 1.0 / invdepths
+        print(f"invdepths.shape:{invdepths.shape}")
+        print(f"invdepths:{invdepths.mean()}")
+        print(f"depths:{depths.mean()}")
+        print(f"conic_opacity:{conic_opacity.mean(dim=0)}")
+        print(f"tiles_touched:{tiles_touched.float().mean(dim=0)}")
+        print(f"rendered_image.mean:{rendered_image.permute(1, 2, 0).reshape(-1,3).mean(dim=0)}")
+        # [C H W] => [H W C]
+        rendered_image = rendered_image.permute(1, 2, 0).contiguous()
+        rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
+        exit()
+        rendered_image_falcor = torch.zeros((height, width, 4), device=device, dtype=torch.float32)
+        # 释放torch内存
+        torch.cuda.empty_cache()
         return rendered_image_falcor,rendered_image_falcor
     
     def debug_image_values(self, rendered_image):
@@ -510,15 +525,15 @@ class GaussianSplatting:
                 loss_falcor = mse(render_image_with_diff_raster[:,:,:3], gt_image)
                 # Backward pass
                 # loss.backward()
-                loss_falcor.backward()
-                print(self.means3Dslang.grad.mean(dim=0))
-                exit()
-                # print self.xyz.grad
-                print(f"grad:{self.means.grad.mean(dim=0)}")
+                # loss_falcor.backward()
+                # print(f"means3D.grad.mean:{self.means.grad.mean(dim=0)}")
+                # print(f"opacity.grad.mean:{self.opacities.grad.mean(dim=0)}")
+                # # exit()
+
                 #self.gaussians.optimizer.step()
                 self.optimizer.step()
-                
-                total_loss += loss.item()
+                self.falcor_renderer.testbed.frame()
+                total_loss += loss_falcor.item()
                 num_batches += 1
             
             # Compute average loss
@@ -531,7 +546,8 @@ class GaussianSplatting:
             if (epoch + 1) % 50 == 0 or epoch == 0:
                 test_pose = self.poses[0]  # Use first pose for visualization
                 with torch.no_grad():
-                    rendered_image,_ = self.render_image(test_pose)
+                    rendered_image,rendered_falcor_image = self.render_image(test_pose)
+                    rendered_image = rendered_falcor_image[:,:,:3]
                     self.debug_image_values(rendered_image)
                     rendered_image_numpy = rendered_image.cpu().numpy()
                     rendered_image_numpy = (255*np.clip(rendered_image_numpy, 0.0, 1.0)).astype(np.uint8)

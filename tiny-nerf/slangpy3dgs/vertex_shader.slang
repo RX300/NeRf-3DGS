@@ -69,15 +69,6 @@ void preprocess_shader(
     inout no_diff float4 p_hom_test,              // 输出测试点
 )
 {
-    // uint32_t g_idx = cudaBlockIdx().x * cudaBlockDim().x + cudaThreadIdx().x;
-
-    // // 检查索引是否有效
-    // if (g_idx >= xyz_ws.size(0))
-    //     return;
-
-    // 初始化半径和触及的瓦片数为0
-    // out_radii[g_idx] = 0;
-    // out_tiles_touched[g_idx] = 0;
     out_radii = 0;
     out_tiles_touched = 0;
 
@@ -215,11 +206,11 @@ void preprocess_shader(
 void preprocess_shader_release(
     // 输入参数
     no_diff int32_t g_idx,                  // 高斯点索引
-    float3 xyz_ws,                          // 世界空间中高斯点的位置
-    float[48] sh_coeffs,                    // 球谐系数
+    inout float3 xyz_ws,                          // 世界空间中高斯点的位置
+    inout float[48] sh_coeffs,                    // 球谐系数
     inout float opacity,                    // 不透明度
-    float4 rotations,                       // 旋转四元数
-    float3 scales,                          // 缩放系数
+    inout float4 rotations,                 // 旋转四元数
+    inout float3 scales,                          // 缩放系数
     no_diff uint active_sh,                 // 活动的球谐阶数
     no_diff float scale_modifier,           // 缩放修正系数
     no_diff float[16] world_view_transform, // 世界到视图变换矩阵
@@ -232,16 +223,15 @@ void preprocess_shader_release(
     no_diff bool prefiltered,               // 是否预过滤
     no_diff bool antialiasing,              // 是否抗锯齿
     // 输出参数
-    out no_diff int32_t out_radii,            // 输出半径
-    out float3 out_xyz_ndc,                   // 输出ndc空间位置
-    out float[6] out_cov3Ds,                  // 输出3D协方差矩阵
-    out float3 out_rgb,                       // 输出RGB颜色
-    out float4 out_inv_cov_vs,                // 输出视图空间逆协方差矩阵
-    out no_diff int32_t out_tiles_touched,    // 输出触及的瓦片数
-    out no_diff int32_t4 out_rect_tile_space, // 输出瓦片区域
+    inout no_diff int32_t out_radii,              // 输出半径
+    out float3 out_xyz_ndc,                     // 输出ndc空间位置
+    out float[6] out_cov3Ds,                    // 输出3D协方差矩阵
+    out float3 out_rgb,                         // 输出RGB颜色
+    out float4 out_inv_cov_vs,                  // 输出视图空间逆协方差矩阵
+    inout no_diff int32_t out_tiles_touched,    // 输出触及的瓦片数
+    inout no_diff int32_t4 out_rect_tile_space, // 输出瓦片区域
 )
 {
-
     out_radii = 0;
     out_tiles_touched = 0;
 
@@ -267,7 +257,6 @@ void preprocess_shader_release(
         proj_mat[8], proj_mat[9], proj_mat[10], proj_mat[11],
         proj_mat[12], proj_mat[13], proj_mat[14], proj_mat[15]
     );
-
     float3 p_orig = xyz_ws;
     float4 p_hom = mul(mul(proj_matv1, world_view_transformv1), float4(xyz_ws, 1.0f));
     float p_w = 1.0f / (p_hom.w + 0.0000001f);
@@ -313,7 +302,6 @@ void preprocess_shader_release(
         ndc2pix(splat.xyz_vs.x, image_width),
         ndc2pix(splat.xyz_vs.y, image_height)
     };
-
     // 计算高斯覆盖的tile区域,用矩形表示
     rectangle rect_tile_space = get_rectangle_tile_space(
         pixelspace_xy,
@@ -350,6 +338,7 @@ void preprocess_shader_release(
     float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
     out_radii = int32_t(radius);
     out_tiles_touched = n_tiles;
+    out_rect_tile_space = int32_t4(rect_tile_space.min_x, rect_tile_space.min_y, rect_tile_space.max_x, rect_tile_space.max_y);
     // 存储视图空间位置
     out_xyz_ndc = splat.xyz_vs;
 
@@ -363,6 +352,7 @@ void preprocess_shader_release(
 
     // 存储2D逆协方差矩阵
     out_inv_cov_vs = float4(inv_cov_vs[0][0], inv_cov_vs[0][1], inv_cov_vs[1][0], inv_cov_vs[1][1]);
+
     // 存储RGB颜色（应用h_convolution_scaling）
     opacity *= h_convolution_scaling; // 在完整实现中，应该使用实际的不透明度
     out_rgb = splat.rgb;

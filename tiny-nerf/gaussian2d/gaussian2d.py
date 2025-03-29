@@ -19,7 +19,7 @@ DIR = Path(__file__).parent
 TARGET_IMAGE = DIR / "./monalisa.jpg"
 
 # 定义高斯 blob 数量、输出图像分辨率及优化迭代次数
-BLOB_COUNT = 1024 * 4                      # 高斯 blob 的数量
+BLOB_COUNT = 1024 * 40                      # 高斯 blob 的数量
 RESOLUTION = 1024                          # 输出图像的分辨率
 ITERATIONS = 4000                          # 优化迭代次数
 
@@ -84,6 +84,13 @@ class Splat2D:
         参数 blobs 为 blob 参数，调用 Falcor 渲染管线，返回渲染后的图像 Tensor。
         """
         # 将 blobs 数据从 PyTorch 传入 Falcor 的缓冲区（detach 防止梯度传播）
+        self.blobs_buf = device.create_structured_buffer(
+            struct_size=32,                # 每个 blob 占用 32 字节
+            element_count=BLOB_COUNT,        # blob 数量
+            bind_flags=falcor.ResourceBindFlags.ShaderResource
+            | falcor.ResourceBindFlags.UnorderedAccess
+            | falcor.ResourceBindFlags.Shared,
+        )
         self.blobs_buf.from_torch(blobs.detach())
         # 等待 CUDA 处理结束
         self.device.render_context.wait_for_cuda()

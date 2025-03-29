@@ -13,7 +13,7 @@ struct FragmentParameter:IDifferentiablePtrType
     typealias Differential = FragmentParameter;
     StructuredBuffer<int32_t> sorted_gauss_idx;
     StructuredBuffer<int32_t2> tile_ranges;
-    RWStructuredBuffer<int32_t2>tile_ranges_out;
+    // RWStructuredBuffer<int32_t2>tile_ranges_out;
     RWStructuredBuffer<float3> xyz_vs;
     RWStructuredBuffer<float4> inv_cov_vs;
     RWStructuredBuffer<float> opacity;
@@ -482,7 +482,6 @@ void splat_tiled_backward_main(uint3 tid: SV_DispatchThreadID, uint3 groupthread
     uint32_t tile_idx = globalIdx.y / fragment_parameter.tile_height * fragment_parameter.grid_width + globalIdx.x / fragment_parameter.tile_width;
     uint32_t tile_idx_start = uint32_t(fragment_parameter.tile_ranges[tile_idx][0]);
     uint32_t tile_idx_end = uint32_t(fragment_parameter.tile_ranges[tile_idx][1]);
-    fragment_parameter.tile_ranges_out[tile_idx] = int2(tile_idx_start, tile_idx_end);
     // 获取图像尺寸
     uint3 image_size;
     fragment_parameter.output_img.GetDimensions(image_size.x, image_size.y);
