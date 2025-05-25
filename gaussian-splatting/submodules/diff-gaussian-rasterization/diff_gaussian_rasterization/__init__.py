@@ -28,18 +28,32 @@ def rasterize_gaussians(
     rotations,
     cov3Ds_precomp,
     raster_settings,
+    debug=False
 ):
-    return _RasterizeGaussians.apply(
-        means3D,
-        means2D,
-        sh,
-        colors_precomp,
-        opacities,
-        scales,
-        rotations,
-        cov3Ds_precomp,
-        raster_settings,
-    )
+    if debug:
+        return _RasterizeGaussians_Debug.apply(
+            means3D,
+            means2D,
+            sh,
+            colors_precomp,
+            opacities,
+            scales,
+            rotations,
+            cov3Ds_precomp,
+            raster_settings,
+        )
+    else:
+        return _RasterizeGaussians.apply(
+            means3D,
+            means2D,
+            sh,
+            colors_precomp,
+            opacities,
+            scales,
+            rotations,
+            cov3Ds_precomp,
+            raster_settings,
+        )
 
 class _RasterizeGaussians(torch.autograd.Function):
     @staticmethod
@@ -77,7 +91,8 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.campos,
             raster_settings.prefiltered,
             raster_settings.antialiasing,
-            raster_settings.debug
+            raster_settings.debug,
+            True
         )
         # rasterize_gaussians对应于RasterizeGaussiansCUDA函数(见ext.cpp)
         # Invoke C++/CUDA rasterizer
@@ -87,9 +102,110 @@ class _RasterizeGaussians(torch.autograd.Function):
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, opacities, geomBuffer, binningBuffer, imgBuffer)
-        #   return color, radii, invdepths
+        return color, radii, invdepths
+
+    # backward方法的输入参数是forward方法的输出参数，数量必须对应上(forward的输出数目=backward的输入数目,forward的输入数目=backward的输出数目)
+    @staticmethod
+    def backward(ctx, grad_out_color, _, grad_out_depth):
+    #   def backward(ctx, grad_out_color, _, grad_out_depth):
+        # Restore necessary values from context
+        num_rendered = ctx.num_rendered
+        raster_settings = ctx.raster_settings
+        colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, opacities, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
+
+        # Restructure args as C++ method expects them
+        args = (raster_settings.bg,
+                means3D, 
+                radii, 
+                colors_precomp, 
+                opacities,
+                scales, 
+                rotations, 
+                raster_settings.scale_modifier, 
+                cov3Ds_precomp, 
+                raster_settings.viewmatrix, 
+                raster_settings.projmatrix, 
+                raster_settings.tanfovx, 
+                raster_settings.tanfovy, 
+                grad_out_color,
+                grad_out_depth, 
+                sh, 
+                raster_settings.sh_degree, 
+                raster_settings.campos,
+                geomBuffer,
+                num_rendered,
+                binningBuffer,
+                imgBuffer,
+                raster_settings.antialiasing,
+                raster_settings.debug)
+
+        # Compute gradients for relevant tensors by invoking backward method
+        grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations,\
+              dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender = _C.rasterize_gaussians_backward(*args)             
+        grads = (
+            grad_means3D,
+            grad_means2D,
+            grad_sh,
+            grad_colors_precomp,
+            grad_opacities,
+            grad_scales,
+            grad_rotations,
+            grad_cov3Ds_precomp,
+            None,
+        )
+
+        return grads
+
+class _RasterizeGaussians_Debug(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        means3D,
+        means2D,
+        sh,
+        colors_precomp,
+        opacities,
+        scales,
+        rotations,
+        cov3Ds_precomp,
+        raster_settings,
+    ):
+
+        # Restructure arguments the way that the C++ lib expects them
+        args = (
+            raster_settings.bg, 
+            means3D,
+            colors_precomp,
+            opacities,
+            scales,
+            rotations,
+            raster_settings.scale_modifier,
+            cov3Ds_precomp,
+            raster_settings.viewmatrix,
+            raster_settings.projmatrix,
+            raster_settings.tanfovx,
+            raster_settings.tanfovy,
+            raster_settings.image_height,
+            raster_settings.image_width,
+            sh,
+            raster_settings.sh_degree,
+            raster_settings.campos,
+            raster_settings.prefiltered,
+            raster_settings.antialiasing,
+            raster_settings.debug,
+            True
+        )
+        # rasterize_gaussians对应于RasterizeGaussiansCUDA函数(见ext.cpp)
+        # Invoke C++/CUDA rasterizer
+        num_rendered, color, radii, geomBuffer, binningBuffer, imgBuffer, invdepths,means2D,meansHomo,conic_opacity,tiles_touched = _C.rasterize_gaussians(*args)
+
+        # Keep relevant tensors for backward
+        ctx.raster_settings = raster_settings
+        ctx.num_rendered = num_rendered
+        ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, opacities, geomBuffer, binningBuffer, imgBuffer)
         return color, radii, invdepths,means2D,meansHomo,conic_opacity,tiles_touched
 
+    # backward方法的输入参数是forward方法的输出参数，数量必须对应上(forward的输出数目=backward的输入数目,forward的输入数目=backward的输出数目)
     @staticmethod
     def backward(ctx, grad_out_color, _, grad_out_depth,grad_out_means2D,grad_out_meansHomo,grad_out_conic_opacity,grad_out_tiles_touched):
     #   def backward(ctx, grad_out_color, _, grad_out_depth):
@@ -126,7 +242,7 @@ class _RasterizeGaussians(torch.autograd.Function):
 
         # Compute gradients for relevant tensors by invoking backward method
         grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations,\
-              dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender = _C.rasterize_gaussians_backward(*args)        
+              dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender = _C.rasterize_gaussians_backward(*args)      
         # 打印dL_dmeans2Drender,dL_dopacityrender,dL_dcolorsrender的均值(dim=0)
         print('dL_dmeans2Drender:',dL_dmeans2Drender.mean(dim=0))
         print('dL_dopacityrender:',dL_dopacityrender.mean(dim=0))
@@ -177,7 +293,7 @@ class GaussianRasterizer(nn.Module):
             
         return visible
 
-    def forward(self, means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
+    def forward(self, means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None, debug=False):
         
         raster_settings = self.raster_settings
 
@@ -210,5 +326,6 @@ class GaussianRasterizer(nn.Module):
             rotations,
             cov3D_precomp,
             raster_settings, 
+            debug
         )
 

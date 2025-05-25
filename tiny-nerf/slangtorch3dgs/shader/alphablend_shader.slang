@@ -15,7 +15,7 @@
 //TODO: Clean-up shared-memory logic, too complicated, could be simplified.
 
 import utils;
-
+// 在def init_fragment_shader(self, tile_height, tile_width):中有定义PYTHON_TILE_HEIGHT
 static const uint TILE_HEIGHT = PYTHON_TILE_HEIGHT;
 static const uint TILE_WIDTH = PYTHON_TILE_WIDTH;
 

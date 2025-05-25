@@ -107,8 +107,8 @@ class FalcorGaussianRenderer:
         # if not hasattr(self, 'out_unsorted_gauss_idx_buffer'):
         #     self.out_unsorted_gauss_idx_buffer = self.create_buffer(4, self.total_size)
 
-        self.out_unsorted_keys_buffer = self.create_buffer(8, self.total_size)
-        self.out_unsorted_gauss_idx_buffer = self.create_buffer(4, self.total_size)
+        out_unsorted_keys_buffer = self.create_buffer(8, self.total_size)
+        out_unsorted_gauss_idx_buffer = self.create_buffer(4, self.total_size)
 
         # 设置计算通道参数
         # xyz_vs = xyz_vs.contiguous()
@@ -126,8 +126,8 @@ class FalcorGaussianRenderer:
         vars.xyz_vs = self.xyz_vs_buffer
         vars.rect_tile_space = self.rect_tile_space_buffer
         vars.index_buffer_offset = self.index_buffer_offset_buffer
-        vars.out_unsorted_keys = self.out_unsorted_keys_buffer
-        vars.out_unsorted_gauss_idx = self.out_unsorted_gauss_idx_buffer
+        vars.out_unsorted_keys = out_unsorted_keys_buffer
+        vars.out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer
         vars.grid_height = grid_height
         vars.grid_width = grid_width
         # 执行计算通道
@@ -137,10 +137,12 @@ class FalcorGaussianRenderer:
         self.device.render_context.wait_for_falcor()
 
         # 获取结果
-        out_unsorted_keys = self.out_unsorted_keys_buffer.to_torch([self.total_size], falcor.int64)
-        out_unsorted_gauss_idx = self.out_unsorted_gauss_idx_buffer.to_torch([self.total_size], falcor.int32)
-        self.out_unsorted_keys_buffer.release_cuda_memoryV5()
-        print("test3")
+        out_unsorted_keys = out_unsorted_keys_buffer.to_torch([self.total_size], falcor.int64)
+        out_unsorted_gauss_idx = out_unsorted_gauss_idx_buffer.to_torch([self.total_size], falcor.int32)
+        del out_unsorted_keys_buffer
+        del out_unsorted_gauss_idx_buffer
+        # self.out_unsorted_keys_buffer.release_cuda_memoryV5()
+        # print("test3")
         self.device.render_context.wait_for_cuda()
         return out_unsorted_keys, out_unsorted_gauss_idx
     def init_compute_tile_ranges_pass(self,grid_width, grid_height):

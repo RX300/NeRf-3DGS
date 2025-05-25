@@ -318,39 +318,40 @@ class GaussianSplatting:
         # print(shs.shape)
         # self.utilsmodule.testNdArray(shs.reshape(self.num_gaussians,-1))
 
-        self.shadermodule.preprocess_shader_release(
-            spy.thread_id(),                    # g_idx - 线程ID
-            means3D,                            # xyz_ws - 世界空间中高斯点的位置
-            shs_array,                          # sh_coeffs - 球谐系数
-            out_opacity,                            # opacities - 不透明度
-            rotations,                          # rotations - 旋转四元数
-            scales,                             # scales - 缩放系数
+        # self.shadermodule.preprocess_shader_release(
+        #     spy.thread_id(),                    # g_idx - 线程ID
+        #     means3D,                            # xyz_ws - 世界空间中高斯点的位置
+        #     shs_array,                          # sh_coeffs - 球谐系数
+        #     out_opacity,                            # opacities - 不透明度
+        #     rotations,                          # rotations - 旋转四元数
+        #     scales,                             # scales - 缩放系数
 
-            # means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
-            # shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
-            # out_opacity,                            # opacities - 不透明度
-            # rotationsslang,                          # rotations - 旋转四元数
-            # scalesslang,                             # scales - 缩放系数
+        #     # means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
+        #     # shsslang.reshape(self.num_gaussians, -1),  # sh_coeffs - 球谐系数
+        #     # out_opacity,                            # opacities - 不透明度
+        #     # rotationsslang,                          # rotations - 旋转四元数
+        #     # scalesslang,                             # scales - 缩放系数
 
-            3,                                  # active_sh - 活动的球谐阶数
-            1.0,                                # scale_modifier - 缩放修正系数
-            world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
-            projection_matrix.T.reshape(-1),                # proj_mat - 投影矩阵
-            camera_center,                      # cam_pos - 相机位置
-            fov,                                # fovy - 视场角y
-            fov,                                # fovx - 视场角x
-            int(height),                        # image_height - 图像高度
-            int(width),                         # image_width - 图像宽度
-            False,                              # prefiltered - 是否预过滤
-            True,                                # antialiasing - 是否抗锯齿
-            out_radii,                          # 输出半径
-            out_xyz_vs,                         # 输出视图空间位置  
-            out_cov3Ds,                         # 输出3D协方差矩阵
-            out_rgb,                            # 输出RGB颜色
-            out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
-            out_tiles_touched,                   # 输出触及的瓦片数
-            out_rect_tile_space                # 输出矩形瓦片空间
-        )
+        #     3,                                  # active_sh - 活动的球谐阶数
+        #     1.0,                                # scale_modifier - 缩放修正系数
+        #     world_view_transform.T.reshape(-1),               # world_view_transform - 世界到视图变换矩阵
+        #     projection_matrix.T.reshape(-1),                # proj_mat - 投影矩阵
+        #     camera_center,                      # cam_pos - 相机位置
+        #     fov,                                # fovy - 视场角y
+        #     fov,                                # fovx - 视场角x
+        #     int(height),                        # image_height - 图像高度
+        #     int(width),                         # image_width - 图像宽度
+        #     False,                              # prefiltered - 是否预过滤
+        #     True,                                # antialiasing - 是否抗锯齿
+        #     out_radii,                          # 输出半径
+        #     out_xyz_vs,                         # 输出视图空间位置  
+        #     out_cov3Ds,                         # 输出3D协方差矩阵
+        #     out_rgb,                            # 输出RGB颜色
+        #     out_inv_cov_vs,                     # 输出视图空间逆协方差矩阵
+        #     out_tiles_touched,                   # 输出触及的瓦片数
+        #     out_rect_tile_space                # 输出矩形瓦片空间
+        # )
+
         # self.shadermodule.preprocess_shader(
         #     spy.thread_id(),                    # g_idx - 线程ID
         #     means3Dslang,                            # xyz_ws - 世界空间中高斯点的位置
@@ -433,7 +434,8 @@ class GaussianSplatting:
             opacities=opacity,
             scales=scales, 
             rotations=rotations,
-            cov3D_precomp=None  # Will be computed from scales and rotations
+            cov3D_precomp=None,  # Will be computed from scales and rotations
+            debug=True,
         )
         # print(f"meanshomo.shape:{meanshomo.shape}")
         # print(f"meanshomo:{meanshomo.mean(dim=0)}")
@@ -452,7 +454,7 @@ class GaussianSplatting:
         # [C H W] => [H W C]
         rendered_image = rendered_image.permute(1, 2, 0).contiguous()
         rendered_image = torch.clamp(rendered_image, 0.0, 1.0)
-        exit()
+        # exit()
         rendered_image_falcor = torch.zeros((height, width, 4), device=device, dtype=torch.float32)
         # 释放torch内存
         torch.cuda.empty_cache()

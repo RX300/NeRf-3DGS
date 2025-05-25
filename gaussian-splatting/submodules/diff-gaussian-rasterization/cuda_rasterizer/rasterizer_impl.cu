@@ -224,7 +224,8 @@ int CudaRasterizer::Rasterizer::forward(
 	float* means2D,
 	float* meansHomo,
 	float* conic_opacity,
-	int* tiles_touched)
+	int* tiles_touched,
+	bool custom_debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -310,31 +311,36 @@ int CudaRasterizer::Rasterizer::forward(
 		radii,
 		tile_grid)
 	CHECK_CUDA(, debug)
-	// print point_list_keys_unsorted和point_list_unsorted的均值
-	// 为了计算均值，我们需要临时分配主机内存
-	uint64_t* h_keys = new uint64_t[num_rendered];
-	uint32_t* h_values = new uint32_t[num_rendered];
-	
-	// 将设备内存拷贝到主机
-	cudaMemcpy(h_keys, binningState.point_list_keys_unsorted, num_rendered * sizeof(uint64_t), cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_values, binningState.point_list_unsorted, num_rendered * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-	
-	// 计算前10个的均值
-	double key_sum = 0.0;
-	double value_sum = 0.0;
-	for (int i = 0; i < 10; i++) {
-		key_sum += (double)h_keys[i];
-		value_sum += (double)h_values[i];
+
+	if(custom_debug)
+	{
+		// print point_list_keys_unsorted和point_list_unsorted的均值
+		// 为了计算均值，我们需要临时分配主机内存
+		uint64_t* h_keys = new uint64_t[num_rendered];
+		uint32_t* h_values = new uint32_t[num_rendered];
+		
+		// 将设备内存拷贝到主机
+		cudaMemcpy(h_keys, binningState.point_list_keys_unsorted, num_rendered * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_values, binningState.point_list_unsorted, num_rendered * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+		
+		// 计算前10个的均值
+		double key_sum = 0.0;
+		double value_sum = 0.0;
+		for (int i = 0; i < 10; i++) {
+			key_sum += (double)h_keys[i];
+			value_sum += (double)h_values[i];
+		}
+		
+		// 打印num_rendered和均值
+		printf("cuda:num_rendered: %d\n", num_rendered);
+		printf("cuda:point_list_keys_unsorted mean[:10]: %.2f\n", key_sum / 10);
+		printf("cuda:point_list_unsorted mean[:10]: %.2f\n", value_sum / 10);
+		
+		// 释放主机内存
+		delete[] h_keys;
+		delete[] h_values;
 	}
-	
-	// 打印num_rendered和均值
-	printf("cuda:num_rendered: %d\n", num_rendered);
-	printf("cuda:point_list_keys_unsorted mean[:10]: %.2f\n", key_sum / 10);
-	printf("cuda:point_list_unsorted mean[:10]: %.2f\n", value_sum / 10);
-	
-	// 释放主机内存
-	delete[] h_keys;
-	delete[] h_values;
+
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
 	// Sort complete list of (duplicated) Gaussian indices by keys
@@ -344,26 +350,30 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted, binningState.point_list_keys,
 		binningState.point_list_unsorted, binningState.point_list,
 		num_rendered, 0, 32 + bit), debug)
-	// print point_list_keys和point_list的均值
-	// 为了计算均值，我们需要临时分配主机内存
-	uint64_t* h_keys_sorted = new uint64_t[num_rendered];
-	uint32_t* h_values_sorted = new uint32_t[num_rendered];
-	// 将设备内存拷贝到主机
-	cudaMemcpy(h_keys_sorted, binningState.point_list_keys, num_rendered * sizeof(uint64_t), cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_values_sorted, binningState.point_list, num_rendered * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-	// 计算前10个的均值
-	double key_sum_sorted = 0.0;
-	double value_sum_sorted = 0.0;
-	for (int i = 0; i < 10; i++) {
-		key_sum_sorted += (double)h_keys_sorted[i];
-		value_sum_sorted += (double)h_values_sorted[i];
+
+	if(custom_debug)
+	{
+		// print point_list_keys和point_list的均值
+		// 为了计算均值，我们需要临时分配主机内存
+		uint64_t* h_keys_sorted = new uint64_t[num_rendered];
+		uint32_t* h_values_sorted = new uint32_t[num_rendered];
+		// 将设备内存拷贝到主机
+		cudaMemcpy(h_keys_sorted, binningState.point_list_keys, num_rendered * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_values_sorted, binningState.point_list, num_rendered * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+		// 计算前10个的均值
+		double key_sum_sorted = 0.0;
+		double value_sum_sorted = 0.0;
+		for (int i = 0; i < 10; i++) {
+			key_sum_sorted += (double)h_keys_sorted[i];
+			value_sum_sorted += (double)h_values_sorted[i];
+		}
+		// 打印num_rendered和均值
+		printf("cuda:point_list_keys mean[:10]: %.2f\n", key_sum_sorted / 10);
+		printf("cuda:point_list mean[:10]: %.2f\n", value_sum_sorted / 10);
+		// 释放主机内存
+		delete[] h_keys_sorted;
+		delete[] h_values_sorted;
 	}
-	// 打印num_rendered和均值
-	printf("cuda:point_list_keys mean[:10]: %.2f\n", key_sum_sorted / 10);
-	printf("cuda:point_list mean[:10]: %.2f\n", value_sum_sorted / 10);
-	// 释放主机内存
-	delete[] h_keys_sorted;
-	delete[] h_values_sorted;
 
 	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
 
@@ -374,19 +384,22 @@ int CudaRasterizer::Rasterizer::forward(
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
-	// 打印出ranges的mean值
-	uint2* h_ranges = new uint2[tile_grid.x * tile_grid.y];
-	cudaMemcpy(h_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost);
-	double x_sum = 0.0, y_sum = 0.0;
-	int count = (int)(tile_grid.x * tile_grid.y);
-	for (int i = 0; i < count; i++) {
-		x_sum += h_ranges[i].x;
-		y_sum += h_ranges[i].y;
+	if(custom_debug)
+	{
+		// 打印出ranges的mean值
+		uint2* h_ranges = new uint2[tile_grid.x * tile_grid.y];
+		cudaMemcpy(h_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost);
+		double x_sum = 0.0, y_sum = 0.0;
+		int count = (int)(tile_grid.x * tile_grid.y);
+		for (int i = 0; i < count; i++) {
+			x_sum += h_ranges[i].x;
+			y_sum += h_ranges[i].y;
+		}
+		printf("cuda:tile_grid: x=%d, y=%d\n", tile_grid.x, tile_grid.y);
+		printf("cuda:ranges mean: x=%.2f, y=%.2f\n", x_sum / count, y_sum / count);
+		delete[] h_ranges;
 	}
-	printf("cuda:tile_grid: x=%d, y=%d\n", tile_grid.x, tile_grid.y);
-	printf("cuda:ranges mean: x=%.2f, y=%.2f\n", x_sum / count, y_sum / count);
-	delete[] h_ranges;
-
+	
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
 	CHECK_CUDA(FORWARD::render(

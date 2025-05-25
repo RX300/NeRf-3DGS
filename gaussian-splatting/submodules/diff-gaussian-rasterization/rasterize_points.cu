@@ -55,7 +55,9 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& campos,
 	const bool prefiltered,
 	const bool antialiasing,
-	const bool debug)
+	const bool debug,
+	//添加的参数
+	const bool custom_debug)
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
@@ -130,10 +132,14 @@ RasterizeGaussiansCUDA(
 		means2D.contiguous().data<float>(),
 		meansHomo.contiguous().data<float>(),
 		conic_opacity.contiguous().data<float>(),
-		tiles_touched.contiguous().data<int>()
+		tiles_touched.contiguous().data<int>(),
+		custom_debug
 	  );
 	  //打印出tiles_touched的mean值
-	  std::cout << "cuda:tiles_touched mean: " << tiles_touched.mean(torch::kFloat32).item<float>() << std::endl;
+	if(custom_debug)
+	{
+		std::cout << "cuda:tiles_touched mean: " << tiles_touched.mean(torch::kFloat32).item<float>() << std::endl;
+	}
   }
   return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth,means2D,meansHomo,conic_opacity,tiles_touched);
 }

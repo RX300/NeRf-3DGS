@@ -1,5 +1,4 @@
-﻿import falcor
-import slangtorch
+﻿import slangtorch
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -13,9 +12,6 @@ def sort_by_keys_torch(keys, values):
 
 class GSRenderer:
     def __init__(self,image_height, image_width, tile_width=16, tile_height=16):
-        self.testbed = falcor.Testbed()
-        self.testbed.show_ui = False
-        self.device = self.testbed.device
         # 获取当前目录
         self.DIR = Path(__file__).parent
         os.environ['TORCH_CUDA_ARCH_LIST'] = '8.6'
