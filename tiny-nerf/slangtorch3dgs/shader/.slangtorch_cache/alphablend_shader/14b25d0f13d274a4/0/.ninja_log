@@ -1,0 +1,4 @@
+# ninja log v5
+18	6337	7699732571143055	alphablend_shader_cuda.cuda.o	e92f72a6f8466d4c
+13	15232	7699732660031349	alphablend_shader.o	774e2b6258db3cf7
+15249	15366	7699732661529409	_slangtorch_alphablend_shader_14b25d0f13d274a4.pyd	f26de47cc8e307b7

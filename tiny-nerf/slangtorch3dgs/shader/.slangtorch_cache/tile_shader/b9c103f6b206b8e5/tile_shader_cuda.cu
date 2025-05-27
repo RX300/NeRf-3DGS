@@ -3459,6 +3459,7 @@ __global__ void __kernel__generate_keys(TensorView xyz_vs_0, TensorView rect_til
 }
 
 
+
 __global__ void __kernel__compute_tile_ranges(TensorView sorted_keys_0, TensorView out_tile_ranges_0)
 {
 
@@ -3466,61 +3467,61 @@ __global__ void __kernel__compute_tile_ranges(TensorView sorted_keys_0, TensorVi
 
     uint _S16 = uint(globalIdx_1);
 
-#line 72
+#line 73
     uint _S17 = ((sorted_keys_0).sizes[(0U)]);
 
-#line 72
+#line 73
     if(_S16 >= _S17)
     {
 
-#line 73
+#line 74
         return;
     }
 
     longlong _S18 = ((sorted_keys_0).load<longlong>((_S16)));
 
-#line 76
+#line 77
     uint currtile_0 = uint(ulonglong(_S18) >> int(32));
     if(globalIdx_1 == int(0))
     {
 
-#line 78
+#line 79
         (out_tile_ranges_0).store<int>((currtile_0), (0U), (int(0)));
 
-#line 77
+#line 78
     }
     else
     {
 
         longlong _S19 = ((sorted_keys_0).load<longlong>((uint(globalIdx_1 - int(1)))));
 
-#line 81
+#line 82
         uint prevtile_0 = uint(ulonglong(_S19) >> int(32));
         if(currtile_0 != prevtile_0)
         {
             (out_tile_ranges_0).store<int>((prevtile_0), (1U), (globalIdx_1));
             (out_tile_ranges_0).store<int>((currtile_0), (0U), (globalIdx_1));
 
-#line 82
+#line 83
         }
 
-#line 77
+#line 78
     }
 
-#line 88
+#line 89
     uint _S20 = ((sorted_keys_0).sizes[(0U)]);
 
-#line 88
+#line 89
     if(_S16 == _S20 - 1U)
     {
 
-#line 89
+#line 90
         uint _S21 = ((sorted_keys_0).sizes[(0U)]);
 
-#line 89
+#line 90
         (out_tile_ranges_0).store<int>((currtile_0), (1U), (int(_S21)));
 
-#line 88
+#line 89
     }
 
     return;

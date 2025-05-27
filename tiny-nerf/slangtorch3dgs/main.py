@@ -29,7 +29,7 @@ class GaussianSplatting:
         # Load the NeRF dataset
         self.load_nerf_data('tiny_nerf_data.npz')
         # Load Falcor renderer
-        self.renderer = GSrenderer.GSRenderer(self.height,self.width,16,16)
+        self.renderer = GSrenderer.GSRenderer(self.height,self.width,8,8)
         # Initialize Gaussian parameters
         self.xyz = torch.empty(0)
         self.scales = torch.empty(0)

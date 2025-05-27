@@ -12412,140 +12412,140 @@ SLANG_PRELUDE_EXPORT
 void __kernel__generate_keys(TensorView _0, TensorView _1, TensorView _2, TensorView _3, TensorView _4, uint32_t _5, uint32_t _6);
 
 
-#line 67
+#line 68
 SLANG_PRELUDE_EXPORT
 void __kernel__compute_tile_ranges(TensorView _0, TensorView _1);
 
 
-#line 67
+#line 68
 SLANG_PRELUDE_EXPORT
 void generate_keys(std::tuple<uint32_t, uint32_t, uint32_t> _blockSize_0, std::tuple<uint32_t, uint32_t, uint32_t> _gridSize_0, torch::Tensor xyz_vs_0, torch::Tensor rect_tile_space_0, torch::Tensor index_buffer_offset_0, torch::Tensor out_unsorted_keys_0, torch::Tensor out_unsorted_gauss_idx_0, uint32_t grid_height_0, uint32_t grid_width_0)
 {
 
-#line 67
+#line 68
     Vector<uint32_t, 3>  _S1 = Vector<uint32_t, 3> (std::get<int(0)>(_blockSize_0), std::get<int(1)>(_blockSize_0), std::get<int(2)>(_blockSize_0));
 
-#line 67
+#line 68
     Vector<uint32_t, 3>  _S2 = Vector<uint32_t, 3> (std::get<int(0)>(_gridSize_0), std::get<int(1)>(_gridSize_0), std::get<int(2)>(_gridSize_0));
 
-#line 67
+#line 68
     TensorView _S3 = make_tensor_view(rect_tile_space_0, "rect_tile_space", torch::kInt32, false);
 
-#line 67
+#line 68
     TensorView _S4 = make_tensor_view(index_buffer_offset_0, "index_buffer_offset", torch::kInt32, false);
 
-#line 67
+#line 68
     TensorView _S5 = make_tensor_view(out_unsorted_keys_0, "out_unsorted_keys", torch::kInt64, false);
 
-#line 67
+#line 68
     TensorView _S6 = make_tensor_view(out_unsorted_gauss_idx_0, "out_unsorted_gauss_idx", torch::kInt32, false);
 
-#line 67
+#line 68
     TensorView _S7 = make_tensor_view(xyz_vs_0, "xyz_vs", torch::kFloat32, false);
 
-#line 67
+#line 68
     FixedArray<void *, 7>  _S8;
 
-#line 67
+#line 68
     _S8[int(0)] = &_S7;
 
-#line 67
+#line 68
     TensorView _S9 = _S3;
 
-#line 67
+#line 68
     _S8[int(1)] = &_S9;
 
-#line 67
+#line 68
     TensorView _S10 = _S4;
 
-#line 67
+#line 68
     _S8[int(2)] = &_S10;
 
-#line 67
+#line 68
     TensorView _S11 = _S5;
 
-#line 67
+#line 68
     _S8[int(3)] = &_S11;
 
-#line 67
+#line 68
     TensorView _S12 = _S6;
 
-#line 67
+#line 68
     _S8[int(4)] = &_S12;
 
-#line 67
+#line 68
     uint32_t _S13 = grid_height_0;
 
-#line 67
+#line 68
     _S8[int(5)] = &_S13;
 
-#line 67
+#line 68
     uint32_t _S14 = grid_width_0;
 
-#line 67
+#line 68
     _S8[int(6)] = &_S14;
 
-#line 67
+#line 68
     AT_CUDA_CHECK(cudaLaunchKernel((const void*)(__kernel__generate_keys), slang_bit_cast<dim3>(_S2), slang_bit_cast<dim3>(_S1), &_S8[int(0)], 0, ((cudaStream_t)at::cuda::getCurrentCUDAStream())));
 
-#line 67
+#line 68
     return;
 }
 
 
-#line 67
+#line 68
 SLANG_PRELUDE_EXPORT
 static std::tuple<std::tuple<const char*, const char*, const char*, const char*, const char*, const char*, const char*, const char*, const char*>, std::tuple<const char*, const char*, const char*, const char*, const char*, const char*, const char*>, const char*, const char*> __funcinfo__generate_keys()
 {
 
-#line 67
+#line 68
     return std::make_tuple(std::make_tuple(Slang::toTerminatedSlice("__blockSize").getBuffer(), Slang::toTerminatedSlice("__gridSize").getBuffer(), Slang::toTerminatedSlice("xyz_vs").getBuffer(), Slang::toTerminatedSlice("rect_tile_space").getBuffer(), Slang::toTerminatedSlice("index_buffer_offset").getBuffer(), Slang::toTerminatedSlice("out_unsorted_keys").getBuffer(), Slang::toTerminatedSlice("out_unsorted_gauss_idx").getBuffer(), Slang::toTerminatedSlice("grid_height").getBuffer(), Slang::toTerminatedSlice("grid_width").getBuffer()), std::make_tuple(Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer()), Slang::toTerminatedSlice(""), Slang::toTerminatedSlice(""));
 }
 
 
-#line 67
+#line 68
 SLANG_PRELUDE_EXPORT
 void compute_tile_ranges(std::tuple<uint32_t, uint32_t, uint32_t> _blockSize_1, std::tuple<uint32_t, uint32_t, uint32_t> _gridSize_1, torch::Tensor sorted_keys_0, torch::Tensor out_tile_ranges_0)
 {
 
-#line 67
+#line 68
     Vector<uint32_t, 3>  _S15 = Vector<uint32_t, 3> (std::get<int(0)>(_blockSize_1), std::get<int(1)>(_blockSize_1), std::get<int(2)>(_blockSize_1));
 
-#line 67
+#line 68
     Vector<uint32_t, 3>  _S16 = Vector<uint32_t, 3> (std::get<int(0)>(_gridSize_1), std::get<int(1)>(_gridSize_1), std::get<int(2)>(_gridSize_1));
 
-#line 67
+#line 68
     TensorView _S17 = make_tensor_view(out_tile_ranges_0, "out_tile_ranges", torch::kInt32, false);
 
-#line 67
+#line 68
     TensorView _S18 = make_tensor_view(sorted_keys_0, "sorted_keys", torch::kInt64, false);
 
-#line 67
+#line 68
     FixedArray<void *, 2>  _S19;
 
-#line 67
+#line 68
     _S19[int(0)] = &_S18;
 
-#line 67
+#line 68
     TensorView _S20 = _S17;
 
-#line 67
+#line 68
     _S19[int(1)] = &_S20;
 
-#line 67
+#line 68
     AT_CUDA_CHECK(cudaLaunchKernel((const void*)(__kernel__compute_tile_ranges), slang_bit_cast<dim3>(_S16), slang_bit_cast<dim3>(_S15), &_S19[int(0)], 0, ((cudaStream_t)at::cuda::getCurrentCUDAStream())));
 
-#line 67
+#line 68
     return;
 }
 
 
-#line 67
+#line 68
 SLANG_PRELUDE_EXPORT
 static std::tuple<std::tuple<const char*, const char*, const char*, const char*>, std::tuple<const char*, const char*>, const char*, const char*> __funcinfo__compute_tile_ranges()
 {
 
-#line 67
+#line 68
     return std::make_tuple(std::make_tuple(Slang::toTerminatedSlice("__blockSize").getBuffer(), Slang::toTerminatedSlice("__gridSize").getBuffer(), Slang::toTerminatedSlice("sorted_keys").getBuffer(), Slang::toTerminatedSlice("out_tile_ranges").getBuffer()), std::make_tuple(Slang::toTerminatedSlice("").getBuffer(), Slang::toTerminatedSlice("").getBuffer()), Slang::toTerminatedSlice(""), Slang::toTerminatedSlice(""));
 }
 

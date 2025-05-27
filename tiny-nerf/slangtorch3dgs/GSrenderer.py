@@ -38,7 +38,7 @@ class GSRenderer:
     def run_shader(self,xyz_ws, rotations, scales,opacity,sh_coeffs, active_sh,world_view_transform, proj_mat, cam_pos,fovy, fovx):
         n_points = xyz_ws.shape[0]
         tiles_touched, rect_tile_space, radii, xyz_vs, inv_cov_vs, rgb =VertexShader.apply(
-            self,xyz_ws, rotations, scales,sh_coeffs, active_sh,world_view_transform, proj_mat, cam_pos,fovy, fovx)
+            self,xyz_ws,sh_coeffs, rotations, scales, opacity, active_sh,world_view_transform, proj_mat, cam_pos,fovy, fovx)
         with torch.no_grad():
             index_buffer_offset = torch.cumsum(tiles_touched, dim=0, dtype=tiles_touched.dtype)
             total_size_index_buffer = index_buffer_offset[-1]
@@ -54,8 +54,6 @@ class GSRenderer:
                     blockSize=(256, 1, 1),
                     gridSize=(math.ceil(n_points/256), 1, 1)
             )    
-
-            highest_tile_id_msb = (self.grid_width*self.grid_height).bit_length()
             sorted_keys, sorted_gauss_idx = sort_by_keys_torch(unsorted_keys, unsorted_gauss_idx)
             tile_ranges = torch.zeros((self.grid_height*self.grid_width, 2), 
                                         device="cuda",
@@ -73,7 +71,7 @@ class GSRenderer:
 
 class VertexShader(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, renderer:GSRenderer,xyz_ws, rotations, scales,sh_coeffs, active_sh,world_view_transform, proj_mat, cam_pos,
+    def forward(ctx, renderer:GSRenderer,xyz_ws,sh_coeffs, rotations, scales,opcities, active_sh,world_view_transform, proj_mat, cam_pos,
                 fovy, fovx):
         n_points = xyz_ws.shape[0]
         tiles_touched = torch.zeros((n_points), device="cuda", dtype=torch.int32)
@@ -84,9 +82,10 @@ class VertexShader(torch.autograd.Function):
         rgb = torch.zeros((n_points, 3),device="cuda",dtype=torch.float)
 
         renderer.vertex_shader.vertex_shader(xyz_ws=xyz_ws,
+                                    sh_coeffs=sh_coeffs,
                                     rotations=rotations,
                                     scales=scales,
-                                    sh_coeffs=sh_coeffs,
+                                    opcities=opcities,
                                     active_sh=active_sh,
                                     world_view_transform=world_view_transform,
                                     proj_mat=proj_mat,
@@ -107,7 +106,7 @@ class VertexShader(torch.autograd.Function):
                                     tile_width=renderer.tile_width).launchRaw(
                                         blockSize=(256, 1, 1),gridSize=(math.ceil(n_points/256), 1, 1))
 
-        ctx.save_for_backward(xyz_ws, rotations, scales, sh_coeffs, world_view_transform, proj_mat, cam_pos,
+        ctx.save_for_backward(xyz_ws, sh_coeffs, rotations, scales,opcities, world_view_transform, proj_mat, cam_pos,
                                 tiles_touched, rect_tile_space, radii, xyz_vs, inv_cov_vs, rgb)
         ctx.renderer = renderer
         ctx.fovy = fovy
@@ -118,7 +117,7 @@ class VertexShader(torch.autograd.Function):
     
     @staticmethod
     def backward(ctx, grad_tiles_touched, grad_rect_tile_space, grad_radii, grad_xyz_vs, grad_inv_cov_vs, grad_rgb):
-        (xyz_ws, rotations, scales, sh_coeffs, world_view_transform, proj_mat, cam_pos,
+        (xyz_ws, sh_coeffs, rotations, scales, opcities, world_view_transform, proj_mat, cam_pos,
         tiles_touched, rect_tile_space, radii, xyz_vs, inv_cov_vs, rgb) = ctx.saved_tensors
         fovy = ctx.fovy
         fovx = ctx.fovx
@@ -135,6 +134,7 @@ class VertexShader(torch.autograd.Function):
                                                     rotations=(rotations, grad_rotations),
                                                     scales=(scales, grad_scales),
                                                     sh_coeffs=(sh_coeffs, grad_sh_coeffs),
+                                                    opcities = opcities,
                                                     active_sh=active_sh,
                                                     world_view_transform=world_view_transform,
                                                     proj_mat=proj_mat,
@@ -156,7 +156,8 @@ class VertexShader(torch.autograd.Function):
                 blockSize=(256, 1, 1),
                 gridSize=(math.ceil(n_points/256), 1, 1)
         )
-        return None, grad_xyz_ws, grad_rotations, grad_scales, grad_sh_coeffs, None, None, None, None, None, None
+        # backward的返回数目要与forward除ctx的输入数目一致
+        return None, grad_xyz_ws, grad_sh_coeffs, grad_rotations, grad_scales, None, None, None, None, None, None, None
 
 class FragmentShader(torch.autograd.Function):
     @staticmethod
