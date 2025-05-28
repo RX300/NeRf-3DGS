@@ -1,13 +1,6 @@
 import utils;
 import spherical_harmonics;
 
-struct rectangle {
-    int32_t min_x;
-    int32_t min_y;
-    int32_t max_x;
-    int32_t max_y;
-};
-
 // pixel_xy是中心点坐标，radius是半径
 rectangle get_rectangle_tile_space(
     float2 pixel_xy,
@@ -102,10 +95,10 @@ void vertex_shader(DiffTensorView xyz_ws,
     float2x2 g_inv_cov_vs = float2x2(splat.cov_vs[1][1], -splat.cov_vs[0][1], -splat.cov_vs[1][0], splat.cov_vs[0][0]) / det;
     
     float2 pixelspace_xy = { ndc2pix(splat.xyz_vs.x, image_width), ndc2pix(splat.xyz_vs.y, image_height) };
-    // rectangle rect_tile_space = get_rectangle_tile_space(pixelspace_xy,radius, grid_height, grid_width, tile_height, tile_width);
-    float4 SungBox = computeSnugBox(float3(g_inv_cov_vs[0][0], g_inv_cov_vs[0][1], g_inv_cov_vs[1][1]), splat.xyz_vs.xy, opcities[g_idx]);
-    rectangle rect_tile_space = getRectangleFromSungBox(SungBox, image_height, image_width, grid_height, grid_width, tile_height, tile_width);
-    int32_t n_tiles = (rect_tile_space.max_x - rect_tile_space.min_x) * (rect_tile_space.max_y - rect_tile_space.min_y);
+    //rectangle rect_tile_space = get_rectangle_tile_space(pixelspace_xy,radius, grid_height, grid_width, tile_height, tile_width);
+    //int32_t n_tiles = (rect_tile_space.max_x - rect_tile_space.min_x) * (rect_tile_space.max_y - rect_tile_space.min_y);
+    uint32_t n_tiles;
+    rectangle rect_tile_space = no_diff computeSnugBox(float3(g_inv_cov_vs[0][0], g_inv_cov_vs[0][1], g_inv_cov_vs[1][1]), pixelspace_xy, opcities[g_idx],int2(grid_width, grid_height), int2(tile_width, tile_height), n_tiles); 
 
     if (n_tiles == 0) {
         return;

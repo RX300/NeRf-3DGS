@@ -16,6 +16,13 @@ import spherical_harmonics;
 
 static const float eps = 1e-7;
 
+struct rectangle {
+    int32_t min_x;
+    int32_t min_y;
+    int32_t max_x;
+    int32_t max_y;
+};
+
 [Differentiable]
 float read_t1_float(uint32_t idx, DiffTensorView t1)
 {
@@ -295,12 +302,12 @@ float3x3 get_covariance_from_quat_scales(float4 q, float3 s) {
 }
 
 float2 computeEllipseIntersection(
-    const float3 invCov2D, const float disc, const float t, const float2 mean2D,
+    const float3 invCov2D, const float disc, const float t, const float2 pixel2D,
     const bool coordIsY, const float coord)
 {   // 通过coordIsY判断给的coord是y轴还是x轴
     // 如果coord是y轴，则要求的是x边界坐标
-    float p_u = coordIsY ? mean2D.y : mean2D.x;
-    float p_v = coordIsY ? mean2D.x : mean2D.y;
+    float p_u = coordIsY ? pixel2D.y : pixel2D.x;
+    float p_v = coordIsY ? pixel2D.x : pixel2D.y;
     float coeff = coordIsY ? invCov2D.x : invCov2D.z;
 
     float h = coord - p_u; // h = y - p.y for y, x - p.x for x
@@ -312,11 +319,12 @@ float2 computeEllipseIntersection(
     };
 }
 
-float4 computeSnugBox(const float3 invCov2D, const float2 mean2D, const float opacity)
+rectangle computeSnugBox(in const float3 invCov2D, in const float2 pixel2D, in const float opacity, 
+    in const int2 grid,in const int2 tile, out uint n_tiles)
 {
     const float disc = invCov2D.y * invCov2D.y - invCov2D.x * invCov2D.z;
     if (invCov2D.x <= 0 || invCov2D.z <= 0 || disc >= 0) {
-        float4(mean2D.x, mean2D.y, mean2D.x, mean2D.y);
+        float4(pixel2D.x, pixel2D.y, pixel2D.x, pixel2D.y);
     }
     // Threshold: opacity * Gaussian = 1 / 255
     const float t = 2.0f * log(opacity * 255.0f);
@@ -326,17 +334,30 @@ float4 computeSnugBox(const float3 invCov2D, const float2 mean2D, const float op
     float y_term = sqrt(-(invCov2D.y * invCov2D.y * t) / (disc * invCov2D.z));
     y_term = (invCov2D.y < 0) ? y_term : -y_term;
 
-    float2 bbox_argmin = { mean2D.y - y_term, mean2D.x - x_term };
-    float2 bbox_argmax = { mean2D.y + y_term, mean2D.x + x_term };
+    float2 bbox_argmin = { pixel2D.y - y_term, pixel2D.x - x_term };
+    float2 bbox_argmax = { pixel2D.y + y_term, pixel2D.x + x_term };
 
     float2 bbox_min = {
-        computeEllipseIntersection(invCov2D, disc, t, mean2D, true, bbox_argmin.x).x,
-        computeEllipseIntersection(invCov2D, disc, t, mean2D, false, bbox_argmin.y).x
+        computeEllipseIntersection(invCov2D, disc, t, pixel2D, true, bbox_argmin.x).x,
+        computeEllipseIntersection(invCov2D, disc, t, pixel2D, false, bbox_argmin.y).x
     };
     float2 bbox_max = {
-        computeEllipseIntersection(invCov2D, disc, t, mean2D, true, bbox_argmax.x).y,
-        computeEllipseIntersection(invCov2D, disc, t, mean2D, false, bbox_argmax.y).y
+        computeEllipseIntersection(invCov2D, disc, t, pixel2D, true, bbox_argmax.x).y,
+        computeEllipseIntersection(invCov2D, disc, t, pixel2D, false, bbox_argmax.y).y
     };
     // 返回计算出的边界框
-    return float4(bbox_min.x, bbox_min.y, bbox_max.x, bbox_max.y);
+    int2 rect_min = {
+        max(0, min((int)grid.x, (int)(bbox_min.x / tile.x))),
+        max(0, min((int)grid.y, (int)(bbox_min.y / tile.y)))
+    };
+    int2 rect_max = {
+        max(0, min((int)grid.x, (int)(bbox_max.x / tile.x + 1))),
+        max(0, min((int)grid.y, (int)(bbox_max.y / tile.y + 1)))
+    };
+
+    int y_span = rect_max.y - rect_min.y;
+    int x_span = rect_max.x - rect_min.x;
+
+    n_tiles = y_span * x_span;
+    return rectangle(rect_min.x, rect_min.y, rect_max.x, rect_max.y);
 }
