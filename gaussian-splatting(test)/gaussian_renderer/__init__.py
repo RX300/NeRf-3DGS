@@ -16,7 +16,7 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from scene.cameras import Camera
 from slangRenderers.GSRenderer import GSRenderer
-
+from slangRenderers.SpeedyGSRenderer import SpeedyGSRenderer
 # def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
 #     """
 #     Render the scene. 
@@ -129,27 +129,6 @@ from slangRenderers.GSRenderer import GSRenderer
     
 #     return out
 
-# 全局变量缓存GSRenderer实例
-_gs_renderer_cache = None
-
-def get_gs_renderer(image_height, image_width):
-    """
-    获取GSRenderer实例，如果尺寸匹配则复用，否则重新创建
-    """
-    global _gs_renderer_cache
-    
-    if (_gs_renderer_cache is None or 
-        _gs_renderer_cache.image_height != image_height or 
-        _gs_renderer_cache.image_width != image_width):
-        
-        print(f"Initializing GSRenderer with dimensions: {image_height}x{image_width}")
-        _gs_renderer_cache = GSRenderer(
-            image_height=int(image_height),
-            image_width=int(image_width)
-        )
-    
-    return _gs_renderer_cache
-
 # 使用GSRenderer替换原先的cuda渲染
 def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
     """
@@ -184,7 +163,7 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
 
     # Initialize GSRenderer
     # GSRenderer is initialized with image dimensions.
-    gs_renderer = get_gs_renderer(
+    gs_renderer = SpeedyGSRenderer.get_gs_renderer(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width)
     )

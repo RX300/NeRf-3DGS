@@ -27,7 +27,7 @@ def sort_by_keys_torch(keys, values):
 # 全局变量缓存GSRenderer实例
 _gs_renderer_cache = None
 
-class GSRenderer:
+class SpeedyGSRenderer:
     def __init__(self,image_height, image_width, tile_width=16, tile_height=16):
         # 获取当前目录
         self.DIR = Path(__file__).parent
@@ -63,17 +63,17 @@ class GSRenderer:
             _gs_renderer_cache.image_height != image_height or 
             _gs_renderer_cache.image_width != image_width):
             
-            print(f"Initializing GSRenderer with dimensions: {image_height}x{image_width}")
-            _gs_renderer_cache = GSRenderer(
+            print(f"Initializing SpeedyGSRenderer with dimensions: {image_height}x{image_width}")
+            _gs_renderer_cache = SpeedyGSRenderer(
                 image_height=int(image_height),
                 image_width=int(image_width)
             )
         return _gs_renderer_cache
 
     def init_vertex_shader(self):
-        self.vertex_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/vertex_shader.slang"), skipNinjaCheck=True)
+        self.vertex_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/speedy-splat/speedy_vertex_shader.slang"), skipNinjaCheck=True)
     def init_tile_shader(self):
-        self.tile_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/tile_shader.slang"), skipNinjaCheck=True)
+        self.tile_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/speedy-splat/speedy_tile_shader.slang"), skipNinjaCheck=True)
     def init_fragment_shader(self, tile_height, tile_width):
         self.fragment_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/alphablend_shader.slang"),
                                                     defines={"PYTHON_TILE_HEIGHT": tile_height, "PYTHON_TILE_WIDTH": tile_width},
@@ -87,13 +87,19 @@ class GSRenderer:
             total_size_index_buffer = index_buffer_offset[-1]
             unsorted_keys = torch.zeros((total_size_index_buffer,), device="cuda", dtype=torch.int64)
             unsorted_gauss_idx = torch.zeros((total_size_index_buffer,), device="cuda", dtype=torch.int32)
-            self.tile_shader.generate_keys(xyz_vs=xyz_vs,
+            self.tile_shader.generate_keys( xyz_vs=xyz_vs,
+                                            opacity=opacity,
+                                            inv_cov_vs=inv_cov_vs,
                                             rect_tile_space=rect_tile_space,
                                             index_buffer_offset=index_buffer_offset,
                                             out_unsorted_keys=unsorted_keys,
                                             out_unsorted_gauss_idx=unsorted_gauss_idx,
                                             grid_height=self.grid_height,
-                                            grid_width=self.grid_width).launchRaw(
+                                            grid_width=self.grid_width,
+                                            tile_height=self.tile_height,
+                                            tile_width=self.tile_width,
+                                            image_height=self.image_height,
+                                            image_width=self.image_width).launchRaw(
                     blockSize=(256, 1, 1),
                     gridSize=(math.ceil(n_points/256), 1, 1)
             )    
@@ -114,7 +120,7 @@ class GSRenderer:
 
 class VertexShader(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, renderer:GSRenderer,xyz_ws,sh_coeffs, rotations, scales,opcities, active_sh,world_view_transform, proj_mat, cam_pos,
+    def forward(ctx, renderer:SpeedyGSRenderer,xyz_ws,sh_coeffs, rotations, scales,opcities, active_sh,world_view_transform, proj_mat, cam_pos,
                 fovy, fovx):
         n_points = xyz_ws.shape[0]
         tiles_touched = torch.zeros((n_points), device="cuda", dtype=torch.int32)
@@ -205,7 +211,7 @@ class VertexShader(torch.autograd.Function):
 
 class FragmentShader(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, renderer:GSRenderer,sorted_gauss_idx, tile_ranges,xyz_vs, inv_cov_vs, opacity, rgb, device="cuda"):
+    def forward(ctx, renderer:SpeedyGSRenderer,sorted_gauss_idx, tile_ranges,xyz_vs, inv_cov_vs, opacity, rgb, device="cuda"):
         image_height = renderer.image_height
         image_width = renderer.image_width
         grid_height = renderer.grid_height

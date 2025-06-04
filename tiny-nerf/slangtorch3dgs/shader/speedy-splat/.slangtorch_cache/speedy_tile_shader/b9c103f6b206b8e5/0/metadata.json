@@ -1,0 +1,58 @@
+{
+    "cpp": {
+        "options": [],
+        "deps": [
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\speedy-splat\\speedy_tile_shader.slang",
+                1748422482.1805139
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\utils.slang",
+                1748417399.1833868
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\spherical_harmonics.slang",
+                1743233912.3686948
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slangc.exe",
+                1740319138.051763
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slang.dll",
+                1740319138.0458221
+            ]
+        ],
+        "version": "1.3.4",
+        "includePaths": []
+    },
+    "cuda": {
+        "options": [],
+        "deps": [
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\speedy-splat\\speedy_tile_shader.slang",
+                1748422482.1805139
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\utils.slang",
+                1748417399.1833868
+            ],
+            [
+                "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader\\spherical_harmonics.slang",
+                1743233912.3686948
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slangc.exe",
+                1740319138.051763
+            ],
+            [
+                "D:\\anaconda3\\envs\\AiStudy\\Lib\\site-packages\\slangtorch\\bin\\slang.dll",
+                1740319138.0458221
+            ]
+        ],
+        "version": "1.3.4",
+        "includePaths": []
+    },
+    "moduleName": "_slangtorch_speedy_tile_shader_b9c103f6b206b8e5",
+    "moduleBinary": "D:\\A_study\\nerf3dgs\\gaussian-splatting(test)\\slangRenderers\\shader/speedy-splat\\.slangtorch_cache\\speedy_tile_shader\\b9c103f6b206b8e5\\0\\_slangtorch_speedy_tile_shader_b9c103f6b206b8e5.pyd"
+}

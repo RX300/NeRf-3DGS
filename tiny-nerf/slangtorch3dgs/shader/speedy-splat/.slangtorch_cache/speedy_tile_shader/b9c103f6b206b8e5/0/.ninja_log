@@ -1,0 +1,4 @@
+# ninja log v5
+19	5593	7701257514597147	speedy_tile_shader_cuda.cuda.o	20edbb9ba12fc6a4
+15	14355	7701257602175817	speedy_tile_shader.o	50ebc73f8c3c6607
+14374	14501	7701257603778858	_slangtorch_speedy_tile_shader_b9c103f6b206b8e5.pyd	324179dfe7528a3d

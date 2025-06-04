@@ -28,7 +28,7 @@ void generate_keys(TensorView<float> xyz_vs,
 
     if (globalIdx >= xyz_vs.size(0))
         return;
-
+    
     float3 ndc_xyz = {
         xyz_vs[uint2(globalIdx, 0)],
         xyz_vs[uint2(globalIdx, 1)],
@@ -63,6 +63,7 @@ void generate_keys(TensorView<float> xyz_vs,
 }
 
 // compute_tile_ranges 对应 identifyTileRanges
+// out_tile_ranges 的格式为 [tile_id, 0] = start_idx, [tile_id, 1] = end_idx
 [AutoPyBindCUDA]
 [CUDAKernel]
 void compute_tile_ranges(TensorView<int64_t> sorted_keys,
@@ -75,17 +76,21 @@ void compute_tile_ranges(TensorView<int64_t> sorted_keys,
 
     // Read tile ID from key. Update start/end of tile range if at limit.
     uint32_t currtile = uint32_t(uint64_t(sorted_keys[globalIdx]) >> 32);
+    // 如果是第一个元素，初始化当前 tile 的起始索引为 0
     if (globalIdx == 0)
         out_tile_ranges[uint2(currtile, 0)] = 0;
     else
     {
+        // 如果当前 tile ID 与前一个 tile ID 不同，更新前一个 tile 的结束索引
         uint32_t prevtile = uint32_t(uint64_t(sorted_keys[globalIdx - 1]) >> 32);
         if (currtile != prevtile)
-        {
+        {   // 更新前一个 tile 的结束索引
             out_tile_ranges[uint2(prevtile, 1)] = globalIdx;
+            // 初始化当前 tile 的起始索引
             out_tile_ranges[uint2(currtile, 0)] = globalIdx;
         }
     }
+    // 如果是最后一个元素，更新当前 tile 的结束索引
     if (globalIdx == sorted_keys.size(0) - 1)
         out_tile_ranges[uint2(currtile, 1)] = sorted_keys.size(0);
 }

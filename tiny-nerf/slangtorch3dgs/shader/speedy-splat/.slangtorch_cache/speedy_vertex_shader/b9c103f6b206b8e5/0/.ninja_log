@@ -1,0 +1,4 @@
+# ninja log v5
+16	8589	7701258508845964	speedy_vertex_shader_cuda.cuda.o	856a9af749cd1e41
+11	15610	7701258579020454	speedy_vertex_shader.o	2f8f0774d1fa9cef
+15630	15754	7701258580600511	_slangtorch_speedy_vertex_shader_b9c103f6b206b8e5.pyd	ab970229495e47d3
