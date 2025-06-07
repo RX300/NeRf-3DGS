@@ -21,12 +21,16 @@ class ParamGroup:
         group = parser.add_argument_group(name)
         for key, value in vars(self).items():
             shorthand = False
+            # 如果参数以 "_" 开头，则允许缩写
             if key.startswith("_"):
                 shorthand = True
                 key = key[1:]
             t = type(value)
             value = value if not fill_none else None 
             if shorthand:
+            # 如果参数允许缩写
+            # 布尔类型，添加长格式("--"+参数全名)和短格式类型("-"+参数第一个字母)，使用 `store_true` 动作
+            # 如果是其他类型，则添加长格式和短格式类型，指定类型和默认值
                 if t == bool:
                     group.add_argument("--" + key, ("-" + key[0:1]), default=value, action="store_true")
                 else:
@@ -38,10 +42,11 @@ class ParamGroup:
                     group.add_argument("--" + key, default=value, type=t)
 
     def extract(self, args):
-        group = GroupParams()
-        for arg in vars(args).items():
+        group = GroupParams()  # 创建一个新的空参数组对象
+        for arg in vars(args).items():  # 遍历所有解析后的命令行参数
+            # 检查参数名是否属于当前参数组
             if arg[0] in vars(self) or ("_" + arg[0]) in vars(self):
-                setattr(group, arg[0], arg[1])
+                setattr(group, arg[0], arg[1])  # 将匹配的参数设置到新对象中
         return group
 
 class ModelParams(ParamGroup): 
@@ -69,6 +74,8 @@ class PipelineParams(ParamGroup):
         self.compute_cov3D_python = False
         self.debug = False
         self.antialiasing = False
+        # 添加其他参数
+        self.renderer="GSRenderer"
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):

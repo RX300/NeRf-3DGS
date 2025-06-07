@@ -162,12 +162,28 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
         pass
 
     # Initialize GSRenderer
-    # GSRenderer is initialized with image dimensions.
-    gs_renderer = SpeedyGSRenderer.get_gs_renderer(
-        image_height=int(viewpoint_camera.image_height),
-        image_width=int(viewpoint_camera.image_width)
-    )
-
+    gs_renderer = None
+    match pipe.renderer:
+        case "GSRenderer":
+            gs_renderer = GSRenderer.get_gs_renderer(
+                image_height=int(viewpoint_camera.image_height),
+                image_width=int(viewpoint_camera.image_width)
+            )
+        case "SpeedyGSRenderer":
+            # SpeedyGSRenderer is a more optimized version of GSRenderer.
+            # It is designed for faster rendering with similar functionality.
+            gs_renderer = SpeedyGSRenderer.get_gs_renderer(
+                image_height=int(viewpoint_camera.image_height),
+                image_width=int(viewpoint_camera.image_width)
+            )
+        case _:
+            raise ValueError(f"Unknown renderer type: {pipe.renderer}. ")
+    
+    # 给函数设置一个静态变量来打印渲染器类型
+    if not hasattr(render, 'renderer_type'):
+        render.renderer_type = type(gs_renderer).__name__
+        print(f"Using renderer type: {render.renderer_type}")
+    
     # Prepare inputs for GSRenderer
     means3D = pc.get_xyz
     rotations = pc.get_rotation

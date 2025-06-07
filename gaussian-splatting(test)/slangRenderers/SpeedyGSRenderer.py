@@ -4,6 +4,7 @@ import torch.nn as nn
 from pathlib import Path
 import os
 import math
+from .GSRenderer import GSRenderer
 
 def get_cuda_compute_capability_string():
     """
@@ -27,7 +28,7 @@ def sort_by_keys_torch(keys, values):
 # 全局变量缓存GSRenderer实例
 _gs_renderer_cache = None
 
-class SpeedyGSRenderer:
+class SpeedyGSRenderer(GSRenderer):
     def __init__(self,image_height, image_width, tile_width=16, tile_height=16):
         # 获取当前目录
         self.DIR = Path(__file__).parent
