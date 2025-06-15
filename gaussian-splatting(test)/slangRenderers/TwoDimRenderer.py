@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 import math
 from .GSRenderer import GSRenderer
-
+# 2dgs的paper和代码解析 https://zhuanlan.zhihu.com/p/708372232
 def get_cuda_compute_capability_string():
     """
     获取当前 PyTorch 可用 CUDA 设备的计算能力字符串 (例如 '8.6')。
@@ -28,7 +28,7 @@ def sort_by_keys_torch(keys, values):
 # 全局变量缓存GSRenderer实例
 _gs_renderer_cache = None
 
-class SpeedyGSRenderer(GSRenderer):
+class TwoDimRenderer(GSRenderer):
     def __init__(self,image_height, image_width, tile_width=16, tile_height=16):
         # 获取当前目录
         self.DIR = Path(__file__).parent
@@ -66,19 +66,19 @@ class SpeedyGSRenderer(GSRenderer):
             if _gs_renderer_cache is not None:
                 del _gs_renderer_cache  # 清除旧的缓存
             
-            print(f"Initializing SpeedyGSRenderer with dimensions: {image_height}x{image_width}")
-            _gs_renderer_cache = SpeedyGSRenderer(
+            print(f"Initializing 2dGSRenderer with dimensions: {image_height}x{image_width}")
+            _gs_renderer_cache = TwoDimRenderer(
                 image_height=int(image_height),
                 image_width=int(image_width)
             )
         return _gs_renderer_cache
 
     def init_vertex_shader(self):
-        self.vertex_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/speedy-splat/speedy_vertex_shader.slang"), skipNinjaCheck=True)
+        self.vertex_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/twodimGS/vertex_shader.slang"), skipNinjaCheck=True)
     def init_tile_shader(self):
-        self.tile_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/speedy-splat/speedy_tile_shader.slang"), skipNinjaCheck=True)
+        self.tile_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/twodimGS/tile_shader.slang"), skipNinjaCheck=True)
     def init_fragment_shader(self, tile_height, tile_width):
-        self.fragment_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/alphablend_shader.slang"),
+        self.fragment_shader = slangtorch.loadModule(os.path.join(self.DIR, "shader/twodimGS/alphablend_shader.slang"),
                                                     defines={"PYTHON_TILE_HEIGHT": tile_height, "PYTHON_TILE_WIDTH": tile_width},
                                                     skipNinjaCheck=True)
     def run_shader(self,xyz_ws, rotations, scales,opacity,sh_coeffs, active_sh,world_view_transform, proj_mat, cam_pos,fovy, fovx):
@@ -123,7 +123,7 @@ class SpeedyGSRenderer(GSRenderer):
 
 class VertexShader(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, renderer:SpeedyGSRenderer,xyz_ws,sh_coeffs, rotations, scales,opcities, active_sh,world_view_transform, proj_mat, cam_pos,
+    def forward(ctx, renderer:TwoDimRenderer,xyz_ws,sh_coeffs, rotations, scales,opcities, active_sh,world_view_transform, proj_mat, cam_pos,
                 fovy, fovx):
         n_points = xyz_ws.shape[0]
         tiles_touched = torch.zeros((n_points), device="cuda", dtype=torch.int32)
@@ -214,7 +214,7 @@ class VertexShader(torch.autograd.Function):
 
 class FragmentShader(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, renderer:SpeedyGSRenderer,sorted_gauss_idx, tile_ranges,xyz_vs, inv_cov_vs, opacity, rgb, device="cuda"):
+    def forward(ctx, renderer:TwoDimRenderer,sorted_gauss_idx, tile_ranges,xyz_vs, inv_cov_vs, opacity, rgb, device="cuda"):
         image_height = renderer.image_height
         image_width = renderer.image_width
         grid_height = renderer.grid_height
