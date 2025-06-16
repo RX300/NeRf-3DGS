@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import math
 from .GSRenderer import GSRenderer
+# 2dgs的project地址：https://surfsplatting.github.io/
 # 2dgs的paper和代码解析 https://zhuanlan.zhihu.com/p/708372232
 def get_cuda_compute_capability_string():
     """

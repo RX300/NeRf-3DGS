@@ -1,27 +1,16 @@
-// Copyright 2024 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-//TODO: Clean-up shared-memory logic, too complicated, could be simplified.
+// https://github.com/hbb1/diff-surfel-rasterization/blob/e0ed0207b3e0669960cfad70852200a4a5847f61/cuda_rasterizer/forward.cu
 
 import utils;
 // 在def init_fragment_shader(self, tile_height, tile_width):中有定义PYTHON_TILE_HEIGHT
 static const uint TILE_HEIGHT = PYTHON_TILE_HEIGHT;
 static const uint TILE_WIDTH = PYTHON_TILE_WIDTH;
-
-groupshared Splat_2D_AlphaBlend collected_splats[TILE_HEIGHT * TILE_WIDTH];
-groupshared uint32_t collected_idx[TILE_HEIGHT * TILE_WIDTH];
-
+static const uint BLOCK_SIZE = TILE_HEIGHT * TILE_WIDTH;
+groupshared Splat_2D_AlphaBlend collected_splats[BLOCK_SIZE];
+groupshared uint32_t collected_idx[BLOCK_SIZE];
+groupshared float4 collected_normal_opacity[BLOCK_SIZE];
+groupshared float3 collected_Tu[BLOCK_SIZE];
+groupshared float3 collected_Tv[BLOCK_SIZE];
+groupshared float3 collected_Tw[BLOCK_SIZE];
 [Differentiable]
 float4 update_pixel_state(float4 pixel_state_t_nm1, float4 gauss_rgba_t_n)
 {
@@ -44,6 +33,8 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                    DiffTensorView opacity,
                    DiffTensorView rgb,
                    DiffTensorView final_pixel_state,
+                   DiffTensorView transMats,
+                   DiffTensorView normal_opacity,
                    TensorView<int32_t> n_contributors,
                    uint32_t2 pix_coord,
                    uint32_t tile_idx_start,
@@ -75,13 +66,42 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
             // 通过排序后的键值对的值数组(储存的是高斯全局索引)获取当前高斯点在高斯数组中的全局索引
             uint32_t coll_id = uint32_t(sorted_gauss_idx[tile_idx_start + splat_pointer_offset]);
             collected_splats[thread_rank] = load_splat_alphablend(coll_id, xyz_vs, inv_cov_vs, opacity, rgb);
+            collected_normal_opacity[thread_rank] = normal_opacity[coll_id];
+            collected_Tu[thread_rank] = { transMats[9 * coll_id + 0], transMats[9 * coll_id + 1], transMats[9 * coll_id + 2] };
+            collected_Tv[thread_rank] = { transMats[9 * coll_id + 3], transMats[9 * coll_id + 4], transMats[9 * coll_id + 5] };
+            collected_Tw[thread_rank] = { transMats[9 * coll_id + 6], transMats[9 * coll_id + 7], transMats[9 * coll_id + 8] };
         }
         AllMemoryBarrierWithGroupSync();
         if (thread_active) {
             for (int j = 0; j < min(block_size, splats_left_to_process); j++)
             {
                 local_n_contrib++;
+                // Fisrt compute two homogeneous planes, See Eq. (8)
                 Splat_2D_AlphaBlend g = collected_splats[j];
+                const float3 Tu = collected_Tu[j];
+                const float3 Tv = collected_Tv[j];
+                const float3 Tw = collected_Tw[j];
+                // Transform the two planes into local u-v system.
+                float3 k = (float)pix_coord.x * Tw - Tu;
+                float3 l = (float)pix_coord.y * Tw - Tv;
+                // Cross product of two planes is a line, Eq. (9)
+                float3 p = cross(k, l);
+                if (p.z == 0.0) continue;
+                // Perspective division to get the intersection (u,v), Eq. (10)
+                float2 s = { p.x / p.z, p.y / p.z };
+                float rho3d = (s.x * s.x + s.y * s.y);
+                // Add low pass filter
+                float2 d = { g.xyz_vs.x - (float)pix_coord.x, g.xyz_vs.y - (float)pix_coord.y };
+                const float FilterInvSquare = 2.0f;
+                float rho2d = FilterInvSquare * (d.x * d.x + d.y * d.y);
+                float rho = min(rho3d, rho2d);
+                // compute intersection and depth
+                float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z;
+                if (depth < 0.2f) continue;
+                float4 nor_o = collected_normal_opacity[j];
+                float normal[3] = { nor_o.x, nor_o.y, nor_o.z };
+                float opa = nor_o.w;
+
                 float4 gauss_rgba = evaluate_splat(g, center_pix_coord, H, W);
                 
                 // Skip Splats that have a tiny contribution.
@@ -113,6 +133,8 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                      DiffTensorView opacity,
                      DiffTensorView rgb,
                      DiffTensorView final_pixel_state,
+                     DiffTensorView transMats,
+                     DiffTensorView normal_opacity,
                      TensorView<int32_t> n_contributors,
                      uint32_t2 pix_coord,
                      uint32_t tile_idx_start,

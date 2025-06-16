@@ -370,3 +370,40 @@ void compute_transmat(
     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
     normal = mul(viewmatrix, float4(local_normal,0.0f)).xyz;
 }
+
+// --------------------------------------------------------------------------------------------------------------------
+// 该代码计算 2D 高斯分布的边界框和中心，并将中心用于创建低通滤波器
+// --------------------------------------------------------------------------------------------------------------------
+/*
+`T`： 3x3 矩阵，用于转换图像坐标到特征空间。上一个函数已经计算了
+* `cutoff`： 高斯分布的截止频率。
+* `point_image`： 指标图像上的点坐标。
+* `extent`： bounding box 的扩展。
+*/
+[Differentiable]
+bool compute_aabb(
+    float3x3 T,
+    float cutoff,
+    out float2 point_image,
+    out float2 extent
+)
+{
+    float3 t = float3(cutoff * cutoff, cutoff * cutoff, -1.0f);
+    float d = dot(t, T[2] * T[2]);
+    if (d == 0.0f) {
+        return false; // 如果 d 为零，则无法计算 AABB
+    }
+    float3 f = (1 / d) * t;
+
+    point_image = float2(
+        dot(f, T[0] * T[2]),
+        dot(f, T[1] * T[2])
+    );
+    float2 h0 = point_image * point_image - float2(dot(f, T[0] * T[0]), dot(f, T[1] * T[1]));
+    float2 h = sqrt(max(h0, float2(0.00001f)));
+    extent = float2(
+        h.x,
+        h.y
+    );
+    return true;
+}
