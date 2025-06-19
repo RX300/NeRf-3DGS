@@ -7,10 +7,7 @@ static const uint TILE_WIDTH = PYTHON_TILE_WIDTH;
 static const uint BLOCK_SIZE = TILE_HEIGHT * TILE_WIDTH;
 groupshared Splat_2D_AlphaBlend collected_splats[BLOCK_SIZE];
 groupshared uint32_t collected_idx[BLOCK_SIZE];
-groupshared float4 collected_normal_opacity[BLOCK_SIZE];
-groupshared float3 collected_Tu[BLOCK_SIZE];
-groupshared float3 collected_Tv[BLOCK_SIZE];
-groupshared float3 collected_Tw[BLOCK_SIZE];
+groupshared Splat_2D_NormalOpacity_UVW collected_normalopacity_Tuvw[BLOCK_SIZE];
 [Differentiable]
 float4 update_pixel_state(float4 pixel_state_t_nm1, float4 gauss_rgba_t_n)
 {
@@ -60,49 +57,24 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
     {
         // 线程块内的所有线程共同从全局内存加载高斯数据到共享内存
         AllMemoryBarrierWithGroupSync();
-        int splat_pointer_offset = i * block_size + thread_rank;
-        if (tile_idx_start + splat_pointer_offset < tile_idx_end)
+        int splat_pointer_offset = i * block_size + thread_rank;        if (tile_idx_start + splat_pointer_offset < tile_idx_end)
         {
             // 通过排序后的键值对的值数组(储存的是高斯全局索引)获取当前高斯点在高斯数组中的全局索引
             uint32_t coll_id = uint32_t(sorted_gauss_idx[tile_idx_start + splat_pointer_offset]);
             collected_splats[thread_rank] = load_splat_alphablend(coll_id, xyz_vs, inv_cov_vs, opacity, rgb);
-            collected_normal_opacity[thread_rank] = normal_opacity[coll_id];
-            collected_Tu[thread_rank] = { transMats[9 * coll_id + 0], transMats[9 * coll_id + 1], transMats[9 * coll_id + 2] };
-            collected_Tv[thread_rank] = { transMats[9 * coll_id + 3], transMats[9 * coll_id + 4], transMats[9 * coll_id + 5] };
-            collected_Tw[thread_rank] = { transMats[9 * coll_id + 6], transMats[9 * coll_id + 7], transMats[9 * coll_id + 8] };
+            collected_normalopacity_Tuvw[thread_rank] = load_splat_alphablend_2(coll_id, normal_opacity, transMats);
         }
         AllMemoryBarrierWithGroupSync();
-        if (thread_active) {
-            for (int j = 0; j < min(block_size, splats_left_to_process); j++)
+        if (thread_active) {            for (int j = 0; j < min(block_size, splats_left_to_process); j++)
             {
                 local_n_contrib++;
-                // Fisrt compute two homogeneous planes, See Eq. (8)
+                // First compute two homogeneous planes, See Eq. (8)
                 Splat_2D_AlphaBlend g = collected_splats[j];
-                const float3 Tu = collected_Tu[j];
-                const float3 Tv = collected_Tv[j];
-                const float3 Tw = collected_Tw[j];
-                // Transform the two planes into local u-v system.
-                float3 k = (float)pix_coord.x * Tw - Tu;
-                float3 l = (float)pix_coord.y * Tw - Tv;
-                // Cross product of two planes is a line, Eq. (9)
-                float3 p = cross(k, l);
-                if (p.z == 0.0) continue;
-                // Perspective division to get the intersection (u,v), Eq. (10)
-                float2 s = { p.x / p.z, p.y / p.z };
-                float rho3d = (s.x * s.x + s.y * s.y);
-                // Add low pass filter
-                float2 d = { g.xyz_vs.x - (float)pix_coord.x, g.xyz_vs.y - (float)pix_coord.y };
-                const float FilterInvSquare = 2.0f;
-                float rho2d = FilterInvSquare * (d.x * d.x + d.y * d.y);
-                float rho = min(rho3d, rho2d);
-                // compute intersection and depth
-                float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z;
-                if (depth < 0.2f) continue;
-                float4 nor_o = collected_normal_opacity[j];
-                float normal[3] = { nor_o.x, nor_o.y, nor_o.z };
-                float opa = nor_o.w;
-
-                float4 gauss_rgba = evaluate_splat(g, center_pix_coord, H, W);
+                Splat_2D_NormalOpacity_UVW trans_data = collected_normalopacity_Tuvw[j];
+                const float3 Tu = trans_data.TU;
+                const float3 Tv = trans_data.TV;
+                const float3 Tw = trans_data.TW;
+                float4 gauss_rgba = evaluate_splat_2dgs(g, center_pix_coord, H, W, Tu, Tv, Tw, trans_data.normal_opacity);
                 
                 // Skip Splats that have a tiny contribution.
                 if (gauss_rgba.a < 1.0f / 255.0f)
@@ -173,12 +145,12 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
     {
         // Collectively fetch per-Gaussian data from global to shared
         AllMemoryBarrierWithGroupSync();
-        int progress = i * block_size + thread_rank;
-        if (tile_idx_start + progress < tile_idx_end)
+        int progress = i * block_size + thread_rank;        if (tile_idx_start + progress < tile_idx_end)
         {
             uint32_t coll_id = uint32_t(sorted_gauss_idx[tile_idx_end - progress - 1]);
             collected_idx[thread_rank] = coll_id;
             collected_splats[thread_rank] = load_splat_alphablend(coll_id, xyz_vs, inv_cov_vs, opacity, rgb);
+            collected_normalopacity_Tuvw[thread_rank] = load_splat_alphablend_2(coll_id, normal_opacity, transMats);
         }
         AllMemoryBarrierWithGroupSync();
         if (is_inside) {
@@ -186,11 +158,17 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
             {
                 current_splat_offset--;
                 if (current_splat_offset >= n_contrib_fwd)
-                    continue;
-                uint32_t g_idx = collected_idx[j];
+                    continue;                uint32_t g_idx = collected_idx[j];
                 Splat_2D_AlphaBlend g = collected_splats[j];
 
-                float4 gauss_rgba = evaluate_splat(g, center_pix_coord, H, W);
+                // Load transformation matrices for 2DGS
+                Splat_2D_NormalOpacity_UVW trans_data = collected_normalopacity_Tuvw[j];
+                const float3 Tu = trans_data.TU;
+                const float3 Tv = trans_data.TV;
+                const float3 Tw = trans_data.TW;
+                float4 normal_opacity_val = trans_data.normal_opacity;
+
+                float4 gauss_rgba = evaluate_splat_2dgs(g, center_pix_coord, H, W, Tu, Tv, Tw, normal_opacity_val);
 
                 if (gauss_rgba.a < 1.0f / 255.0f)
                     continue;
@@ -202,11 +180,23 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                 DifferentialPair<Splat_2D_AlphaBlend> dp_g = diffPair(g);
                 DifferentialPair<float4> dp_gauss_rgba = diffPair(gauss_rgba);
                 DifferentialPair<float4> dp_current_pixel_state = diffPair(current_pixel_state);
-
+                DifferentialPair<float3> dp_Tu = diffPair(Tu);
+                DifferentialPair<float3> dp_Tv = diffPair(Tv);
+                DifferentialPair<float3> dp_Tw = diffPair(Tw);
+                DifferentialPair<float4> dp_normal_opacity_val = diffPair(normal_opacity_val);                
                 bwd_diff(update_pixel_state)(dp_current_pixel_state, dp_gauss_rgba, d_current_pixel_state);
                 d_current_pixel_state = dp_current_pixel_state.getDifferential();
-                bwd_diff(evaluate_splat)(dp_g, dp_center_pix_coord, H, W, dp_gauss_rgba.d);
+                bwd_diff(evaluate_splat_2dgs)(dp_g, dp_center_pix_coord, H, W, dp_Tu, dp_Tv, dp_Tw, dp_normal_opacity_val, dp_gauss_rgba.d);
                 bwd_diff(load_splat_alphablend)(g_idx, xyz_vs, inv_cov_vs, opacity, rgb, dp_g.d);
+                
+                // Propagate gradients through load_splat_alphablend_2
+                Splat_2D_NormalOpacity_UVW d_trans_data = {};
+                d_trans_data.TU = dp_Tu.d;
+                d_trans_data.TV = dp_Tv.d;
+                d_trans_data.TW = dp_Tw.d;
+                d_trans_data.normal_opacity = dp_normal_opacity_val.d;
+                bwd_diff(load_splat_alphablend_2)(g_idx, normal_opacity, transMats, d_trans_data);
+                
             }
         }
         splats_left_to_process -= block_size;
@@ -223,6 +213,8 @@ void splat_tiled(TensorView<int32_t> sorted_gauss_idx,
                  DiffTensorView opacity,
                  DiffTensorView rgb,
                  DiffTensorView output_img,
+                 DiffTensorView transMats,
+                 DiffTensorView normal_opacity,
                  TensorView<int32_t> n_contributors,
                  int grid_height,
                  int grid_width,
@@ -237,14 +229,14 @@ void splat_tiled(TensorView<int32_t> sorted_gauss_idx,
     uint32_t tile_idx_start = uint32_t(tile_ranges[uint2(tile_idx, 0)]);
     uint32_t tile_idx_end = uint32_t(tile_ranges[uint2(tile_idx, 1)]);
 
-    bool is_inside = (pix_coord.x < output_img.size(1) && pix_coord.y < output_img.size(0));
-
-    float4 pixel_state = alpha_blend(sorted_gauss_idx,
+    bool is_inside = (pix_coord.x < output_img.size(1) && pix_coord.y < output_img.size(0));    float4 pixel_state = alpha_blend(sorted_gauss_idx,
                                      xyz_vs,
                                      inv_cov_vs,
                                      opacity,
                                      rgb,
                                      output_img,
+                                     transMats,
+                                     normal_opacity,
                                      n_contributors,
                                      pix_coord,
                                      tile_idx_start,
