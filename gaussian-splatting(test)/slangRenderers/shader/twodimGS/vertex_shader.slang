@@ -1,4 +1,4 @@
-import utils;
+import utils_2dgs;
 import spherical_harmonics;
 
 // pixel_xy是中心点坐标，radius是半径
@@ -40,9 +40,11 @@ void vertex_shader(DiffTensorView xyz_ws,
                    TensorView<int32_t> out_tiles_touched,
                    TensorView<int32_t> out_rect_tile_space,
                    TensorView<int32_t> out_radii,
+                   TensorView<float> out_transMat,
                    DiffTensorView out_xyz_vs,
                    DiffTensorView out_inv_cov_vs,
                    DiffTensorView out_rgb,
+                   DiffTensorView out_normal,
                    no_diff float fovy,
                    no_diff float fovx,
                    uint image_height,
@@ -64,16 +66,45 @@ void vertex_shader(DiffTensorView xyz_ws,
         return;
     }
 
-    float det = compute_det(splat.cov_vs);
+    // float det = compute_det(splat.cov_vs);
 
-    if (det == 0.0f)
-        return;
-    float radius = splat_radius(splat.cov_vs, det);
+    // if (det == 0.0f)
+    //     return;
+    // float radius = splat_radius(splat.cov_vs, det);
 
-    float2x2 g_inv_cov_vs = float2x2(splat.cov_vs[1][1], -splat.cov_vs[0][1], -splat.cov_vs[1][0], splat.cov_vs[0][0]) / det;
+    // float2x2 g_inv_cov_vs = float2x2(splat.cov_vs[1][1], -splat.cov_vs[0][1], -splat.cov_vs[1][0], splat.cov_vs[0][0]) / det;
     
-    float2 pixelspace_xy = { ndc2pix(splat.xyz_vs.x, image_width), ndc2pix(splat.xyz_vs.y, image_height) };
-    rectangle rect_tile_space = get_rectangle_tile_space(pixelspace_xy,radius, grid_height, grid_width, tile_height, tile_width);
+    // float2 pixelspace_xy = { ndc2pix(splat.xyz_vs.x, image_width), ndc2pix(splat.xyz_vs.y, image_height) };
+    // rectangle rect_tile_space = get_rectangle_tile_space(pixelspace_xy,radius, grid_height, grid_width, tile_height, tile_width);
+    // int32_t n_tiles = (rect_tile_space.max_x - rect_tile_space.min_x) * (rect_tile_space.max_y - rect_tile_space.min_y);
+
+    // if (n_tiles == 0) {
+    //     return;
+    // }
+
+    float3x3 T;
+    float3 normal;
+    compute_transmat(gauss.xyz_ws, gauss.scales.xy, 1.0f, gauss.rotations, cam.proj_mat, cam.world_view_transform, image_width, image_height, T, normal);
+    out_transMat[uint2(g_idx, 0)] = T[0][0];
+    out_transMat[uint2(g_idx, 1)] = T[0][1];
+    out_transMat[uint2(g_idx, 2)] = T[0][2];
+    out_transMat[uint2(g_idx, 3)] = T[1][0];
+    out_transMat[uint2(g_idx, 4)] = T[1][1];
+    out_transMat[uint2(g_idx, 5)] = T[1][2];
+    out_transMat[uint2(g_idx, 6)] = T[2][0];
+    out_transMat[uint2(g_idx, 7)] = T[2][1];
+    out_transMat[uint2(g_idx, 8)] = T[2][2];
+
+    float cutoff = 3.0f;
+    float2 point_image;
+    float radius;
+    float2 extent;
+    const float FilterSize = 0.707106; // sqrt(2) / 2
+    bool ok = compute_aabb(T, cutoff, point_image, extent);
+    if (!ok) return;
+    radius = ceil(max(max(extent.x, extent.y), cutoff * FilterSize));
+
+    rectangle rect_tile_space = get_rectangle_tile_space(point_image,radius, grid_height, grid_width, tile_height, tile_width);
     int32_t n_tiles = (rect_tile_space.max_x - rect_tile_space.min_x) * (rect_tile_space.max_y - rect_tile_space.min_y);
 
     if (n_tiles == 0) {
@@ -90,10 +121,10 @@ void vertex_shader(DiffTensorView xyz_ws,
     out_xyz_vs.storeOnce(uint2(g_idx, 0), splat.xyz_vs.x);
     out_xyz_vs.storeOnce(uint2(g_idx, 1), splat.xyz_vs.y);
     out_xyz_vs.storeOnce(uint2(g_idx, 2), splat.xyz_vs.z);
-    out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 0), g_inv_cov_vs[0][0]);
-    out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 1), g_inv_cov_vs[0][1]);
-    out_inv_cov_vs.storeOnce(uint3(g_idx, 1, 0), g_inv_cov_vs[1][0]);
-    out_inv_cov_vs.storeOnce(uint3(g_idx, 1, 1), g_inv_cov_vs[1][1]);
+    // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 0), g_inv_cov_vs[0][0]);
+    // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 1), g_inv_cov_vs[0][1]);
+    // out_inv_cov_vs.storeOnce(uint3(g_idx, 1, 0), g_inv_cov_vs[1][0]);
+    // out_inv_cov_vs.storeOnce(uint3(g_idx, 1, 1), g_inv_cov_vs[1][1]);
     out_rgb.storeOnce(uint2(g_idx, 0), splat.rgb.r);
     out_rgb.storeOnce(uint2(g_idx, 1), splat.rgb.g);
     out_rgb.storeOnce(uint2(g_idx, 2), splat.rgb.b);

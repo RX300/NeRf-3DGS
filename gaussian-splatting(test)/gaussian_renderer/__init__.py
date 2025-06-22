@@ -17,6 +17,7 @@ from utils.sh_utils import eval_sh
 from scene.cameras import Camera
 from slangRenderers.GSRenderer import GSRenderer
 from slangRenderers.SpeedyGSRenderer import SpeedyGSRenderer
+from slangRenderers.TwoDimRenderer import TwoDimRenderer
 # def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
 #     """
 #     Render the scene. 
@@ -173,6 +174,11 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
             # SpeedyGSRenderer is a more optimized version of GSRenderer.
             # It is designed for faster rendering with similar functionality.
             gs_renderer = SpeedyGSRenderer.get_gs_renderer(
+                image_height=int(viewpoint_camera.image_height),
+                image_width=int(viewpoint_camera.image_width)
+            )
+        case "TwoDimRenderer":
+            gs_renderer = TwoDimRenderer.get_gs_renderer(
                 image_height=int(viewpoint_camera.image_height),
                 image_width=int(viewpoint_camera.image_width)
             )

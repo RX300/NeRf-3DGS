@@ -158,7 +158,8 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
             {
                 current_splat_offset--;
                 if (current_splat_offset >= n_contrib_fwd)
-                    continue;                uint32_t g_idx = collected_idx[j];
+                    continue;                
+                uint32_t g_idx = collected_idx[j];
                 Splat_2D_AlphaBlend g = collected_splats[j];
 
                 // Load transformation matrices for 2DGS
@@ -188,7 +189,7 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                 d_current_pixel_state = dp_current_pixel_state.getDifferential();
                 bwd_diff(evaluate_splat_2dgs)(dp_g, dp_center_pix_coord, H, W, dp_Tu, dp_Tv, dp_Tw, dp_normal_opacity_val, dp_gauss_rgba.d);
                 bwd_diff(load_splat_alphablend)(g_idx, xyz_vs, inv_cov_vs, opacity, rgb, dp_g.d);
-                
+
                 // Propagate gradients through load_splat_alphablend_2
                 Splat_2D_NormalOpacity_UVW d_trans_data = {};
                 d_trans_data.TU = dp_Tu.d;

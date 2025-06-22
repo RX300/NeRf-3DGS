@@ -197,6 +197,14 @@ struct Splat_2D_Vertex : IDifferentiable
     float2x2 cov_vs;
 };
 
+struct Splat_2D_NormalOpacity_UVW : IDifferentiable
+{
+    float3 TU;
+    float3 TV;
+    float3 TW;
+    float4 normal_opacity; // normal in world space, opacity
+};
+
 float splat_radius(float2x2 cov_vs, float det) {
     float mid = 0.5f * (cov_vs[0][0] + cov_vs[1][1]);
     float eigen_val_1 = mid + sqrt(max(0.1f, mid * mid - det));
@@ -262,6 +270,28 @@ Splat_2D_AlphaBlend load_splat_alphablend(int32_t g_idx,
 }
 
 [Differentiable]
+Splat_2D_NormalOpacity_UVW load_splat_alphablend_2(int32_t g_idx,
+                                                   DiffTensorView normal_opacity,
+                                                   DiffTensorView transMats)
+{
+    // Load normal and opacity (4 components: normal.xyz + opacity)
+    float4 g_normal_opacity = read_t4_float4(g_idx, normal_opacity);
+    float3 g_Tu = float3(transMats[9 * g_idx + 0],
+                         transMats[9 * g_idx + 1],
+                         transMats[9 * g_idx + 2]);
+
+    float3 g_Tv = float3(transMats[9 * g_idx + 3],
+                         transMats[9 * g_idx + 4],
+                         transMats[9 * g_idx + 5]);
+
+    float3 g_Tw = float3(transMats[9 * g_idx + 6],
+                         transMats[9 * g_idx + 7],
+                         transMats[9 * g_idx + 8]);
+
+    return { g_Tu, g_Tv, g_Tw, g_normal_opacity };
+}
+
+[Differentiable]
 float4 evaluate_splat(Splat_2D_AlphaBlend g, 
                       float2 pix_coord,
                       uint32_t H,
@@ -280,6 +310,45 @@ float4 evaluate_splat(Splat_2D_AlphaBlend g,
     float alpha = min(0.99f, g_opacity * exp(power));
     float3 premult_rgb = g_rgb * alpha;
     
+    return float4(premult_rgb, alpha);
+}
+
+[Differentiable]
+float4 evaluate_splat_2dgs(Splat_2D_AlphaBlend g,
+                           float2 pix_coord,
+                           uint32_t H,
+                           uint32_t W,
+                           const float3 Tu,
+                           const float3 Tv,
+                           const float3 Tw,
+                           const float4 normal_opacity)
+{
+    // Fisrt compute two homogeneous planes, See Eq. (8)
+    // Transform the two planes into local u-v system.
+    float3 k = (float)pix_coord.x * Tw - Tu;
+    float3 l = (float)pix_coord.y * Tw - Tv;
+    // Cross product of two planes is a line, Eq. (9)
+    float3 p = cross(k, l);
+    if (p.z == 0.0) 
+        return float4(0.0f, 0.0f, 0.0f, 0.0f); // 主要是让最后一个分量为0，跳过这个高斯的计算
+    // Perspective division to get the intersection (u,v), Eq. (10)
+    float2 s = { p.x / p.z, p.y / p.z };
+    float rho3d = (s.x * s.x + s.y * s.y);
+    // Add low pass filter
+    float2 d = { g.xyz_vs.x - (float)pix_coord.x, g.xyz_vs.y - (float)pix_coord.y };
+    const float FilterInvSquare = 2.0f;
+    float rho2d = FilterInvSquare * (d.x * d.x + d.y * d.y);
+    float rho = min(rho3d, rho2d);
+    // compute intersection and depth
+    float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z;
+    if (depth < 0.2f)
+        return float4(0.0f, 0.0f, 0.0f, 0.0f); // 主要是让最后一个分量为0，跳过这个高斯的计算
+    float4 nor_o = normal_opacity;
+    float normal[3] = { nor_o.x, nor_o.y, nor_o.z };
+    float opa = nor_o.w;
+    float power = -0.5f * rho;
+    float alpha = min(0.99f, opa * exp(power));
+    float3 premult_rgb = g.rgb * alpha;
     return float4(premult_rgb, alpha);
 }
 
@@ -312,13 +381,66 @@ float3x3 quat_to_rotmat(float4 q) {
 }
 
 [Differentiable]
-float3x3 scale_to_mat(float3 scale) {
+float3x3 scale_to_mat(float2 scale, float mod) {
     return float3x3(
-        scale.x , 0, 0,
-        0, scale.y , 0,
-        0, 0, scale.z
+        scale.x * mod, 0, 0,
+        0, scale.y * mod, 0,
+        0, 0, 1.0f
     );
 }
+
+// [Differentiable]
+// void compute_transmat(
+//     float3 p_orig,
+//     float2 scale,
+//     float mod,
+//     float4 rot,
+//     float4x4 projmatrix,
+//     float4x4 viewmatrix,
+//     int W,
+//     int H,
+//     out float3x3 T,
+//     out float3 normal
+// ) {
+//     // rot转换为旋转矩阵R
+//     float3x3 R = quat_to_rotmat(rot);
+
+//     // 函数将缩放向量 `scale` 和缩放因子 `mod` 转换为缩放矩阵 `S`
+//     float3x3 S = scale_to_mat(scale, mod);
+
+//     // 计算变换矩阵 `L`
+//     float3x3 L = mul(R, S);
+
+//     // 计算世界坐标到 NDC 的矩阵
+//     // splat2world矩阵 将 Gaussians 的中心从局部坐标转换为相机坐标。
+//     // 这里的splat2world对应论文中的H变换
+//     float4x3 splat2world = float4x3(
+//         L[0][0], L[0][1], p_orig.x,
+//         L[1][0], L[1][1], p_orig.y,
+//         L[2][0], L[2][1], p_orig.z,
+//         0.0, 0.0, 1.0
+//     );
+
+//     // world2ndc矩阵 将世界坐标转换为 NDC坐标
+//     // projmatrix已经是float4x4格式，直接使用
+//     // world2ndc*ndc2pix对应论文中的W变换
+//     float4x4 world2ndc = projmatrix;
+
+//     // 矩阵将 NDC坐标转换为像素坐标
+//     float4x3 ndc2pix = float4x3(
+//         float(W)/2.0, 0.0, 0.0,
+//         0.0, float(H)/2.0, 0.0,
+//         0.0, 0.0, 0.0,
+//         float(W-1)/2.0, float(H-1)/2.0, 1.0
+//     );
+
+//     // 计算传输矩阵 T
+//     T = mul(transpose(ndc2pix), mul(world2ndc, splat2world));
+    
+//     // 计算法线 normal
+//     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
+//     normal = mul(viewmatrix, float4(local_normal,0.0f)).xyz;
+// }
 
 [Differentiable]
 void compute_transmat(
@@ -330,7 +452,7 @@ void compute_transmat(
     float4x4 viewmatrix,
     int W,
     int H,
-    out float3x4 T,
+    out float3x3 T,
     out float3 normal
 ) {
     // rot转换为旋转矩阵R
@@ -344,27 +466,69 @@ void compute_transmat(
 
     // 计算世界坐标到 NDC 的矩阵
     // splat2world矩阵 将 Gaussians 的中心从局部坐标转换为相机坐标。
-    float3x4 splat2world = float3x4(
-        float4(L[0], 0.0),
-        float4(L[1], 0.0),
-        float4(p_orig, 1.0)
+    // 这里的splat2world对应论文中的H变换
+    float4x4 splat2world = float4x4(
+        L[0][0], L[0][1], 0.0, p_orig.x,
+        L[1][0], L[1][1], 0.0, p_orig.y,
+        L[2][0], L[2][1], 0.0, p_orig.z,
+        0.0, 0.0, 0.0, 1.0
     );
 
     // world2ndc矩阵 将世界坐标转换为 NDC坐标
     // projmatrix已经是float4x4格式，直接使用
+    // world2ndc*ndc2pix对应论文中的W变换
     float4x4 world2ndc = projmatrix;
 
     // 矩阵将 NDC坐标转换为像素坐标
-    float3x4 ndc2pix = float3x4(
-        float4(float(W) / 2.0, 0.0, 0.0, float(W - 1) / 2.0),
-        float4(0.0, float(H) / 2.0, 0.0, float(H - 1) / 2.0),
-        float4(0.0, 0.0, 0.0, 1.0)
+    float4x4 ndc2pix = float4x4(
+        float(W) / 2.0, 0.0, 0.0, float(W - 1) / 2.0,
+        0.0, float(H) / 2.0, 0.0, float(H - 1) / 2.0,
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
     );
 
-    // 计算传输矩阵 T
-    T = mul(mul(transpose(splat2world), world2ndc), ndc2pix);
-
+    const float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
+    T[0] = temp[0].xyw;
+    T[1] = temp[1].xyw;
+    T[2] = temp[3].xyw;
     // 计算法线 normal
-    float3 local_normal = float3(L[2].x, L[2].y, L[2].z);
-    normal = transformVec4x3(local_normal, viewmatrix);
+    float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
+    normal = mul(viewmatrix, float4(local_normal, 0.0f)).xyz;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+// 该代码计算 2D 高斯分布的边界框和中心，并将中心用于创建低通滤波器
+// --------------------------------------------------------------------------------------------------------------------
+/*
+`T`： 3x3 矩阵，用于转换图像坐标到特征空间。上一个函数已经计算了
+* `cutoff`： 高斯分布的截止频率。
+* `point_image`： 指标图像上的点坐标。
+* `extent`： bounding box 的扩展。
+*/
+[Differentiable]
+bool compute_aabb(
+    float3x3 T,
+    float cutoff,
+    out float2 point_image,
+    out float2 extent
+)
+{
+    float3 t = float3(cutoff * cutoff, cutoff * cutoff, -1.0f);
+    float d = dot(t, T[2] * T[2]);
+    if (d == 0.0f) {
+        return false; // 如果 d 为零，则无法计算 AABB
+    }
+    float3 f = (1 / d) * t;
+
+    point_image = float2(
+        dot(f, T[0] * T[2]),
+        dot(f, T[1] * T[2])
+    );
+    float2 h0 = point_image * point_image - float2(dot(f, T[0] * T[0]), dot(f, T[1] * T[1]));
+    float2 h = sqrt(max(h0, float2(0.00001f)));
+    extent = float2(
+        h.x,
+        h.y
+    );
+    return true;
 }
