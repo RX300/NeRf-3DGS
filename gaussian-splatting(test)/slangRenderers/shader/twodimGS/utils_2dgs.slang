@@ -487,10 +487,14 @@ void compute_transmat(
         0.0, 0.0, 0.0, 1.0
     );
 
-    const float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
-    T[0] = temp[0].xyw;
-    T[1] = temp[1].xyw;
-    T[2] = temp[3].xyw;
+    float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
+    //float4x4 temp = mul(splat2world, mul(world2ndc, ndc2pix));
+    T = float3x3(temp[0][0], temp[0][1], temp[0][3],
+                 temp[1][0], temp[1][1], temp[1][3],
+                 temp[3][0], temp[3][1], temp[3][3]);
+    // T[0] = temp[0].xyw;
+    // T[1] = temp[1].xyw;
+    // T[2] = temp[3].xyw;
     // 计算法线 normal
     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
     normal = mul(viewmatrix, float4(local_normal, 0.0f)).xyz;

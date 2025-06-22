@@ -415,7 +415,9 @@ class TwoDimRenderer(GSRenderer):
             # 计算tile ranges
             tile_ranges = torch.zeros((self.grid_height*self.grid_width, 2), 
                                      device="cuda", dtype=torch.int32)
-            
+            if total_size_index_buffer==0:
+                #报异常
+                raise ValueError("total_size_index_buffer == 0")
             self.tile_shader.compute_tile_ranges(
                 sorted_keys=sorted_keys,
                 out_tile_ranges=tile_ranges
@@ -455,7 +457,13 @@ class VertexShader(torch.autograd.Function):
         xyz_vs = torch.zeros((n_points, 3), device="cuda", dtype=torch.float)
         inv_cov_vs = torch.zeros((n_points, 2, 2), device="cuda", dtype=torch.float)
         rgb = torch.zeros((n_points, 3), device="cuda", dtype=torch.float)
-        normal = torch.zeros((n_points, 3), device="cuda", dtype=torch.float)
+        normal = torch.zeros((n_points, 4), device="cuda", dtype=torch.float)
+
+        # 确保张量在内存中是连续的
+        xyz_ws = xyz_ws.contiguous()
+        opacity = opacity.contiguous()
+        rotations = rotations.contiguous()
+        scales = scales.contiguous()
 
         # 调用vertex shader
         renderer.vertex_shader.vertex_shader(

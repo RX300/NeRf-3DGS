@@ -32,7 +32,7 @@ void vertex_shader(DiffTensorView xyz_ws,
                    DiffTensorView sh_coeffs,
                    DiffTensorView rotations,
                    DiffTensorView scales,
-                   TensorView<float> opcities,
+                   DiffTensorView opcities,
                    uint active_sh,
                    TensorView<float> world_view_transform,
                    TensorView<float> proj_mat,
@@ -128,4 +128,9 @@ void vertex_shader(DiffTensorView xyz_ws,
     out_rgb.storeOnce(uint2(g_idx, 0), splat.rgb.r);
     out_rgb.storeOnce(uint2(g_idx, 1), splat.rgb.g);
     out_rgb.storeOnce(uint2(g_idx, 2), splat.rgb.b);
+
+    out_normal[uint2(g_idx, 0)] = normal.x;
+    out_normal[uint2(g_idx, 1)] = normal.y;
+    out_normal[uint2(g_idx, 2)] = normal.z;
+    out_normal[uint2(g_idx, 3)] = opcities[uint(g_idx)];
 }

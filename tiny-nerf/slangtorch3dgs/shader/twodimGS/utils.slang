@@ -389,59 +389,6 @@ float3x3 scale_to_mat(float2 scale, float mod) {
     );
 }
 
-// [Differentiable]
-// void compute_transmat(
-//     float3 p_orig,
-//     float2 scale,
-//     float mod,
-//     float4 rot,
-//     float4x4 projmatrix,
-//     float4x4 viewmatrix,
-//     int W,
-//     int H,
-//     out float3x3 T,
-//     out float3 normal
-// ) {
-//     // rot转换为旋转矩阵R
-//     float3x3 R = quat_to_rotmat(rot);
-
-//     // 函数将缩放向量 `scale` 和缩放因子 `mod` 转换为缩放矩阵 `S`
-//     float3x3 S = scale_to_mat(scale, mod);
-
-//     // 计算变换矩阵 `L`
-//     float3x3 L = mul(R, S);
-
-//     // 计算世界坐标到 NDC 的矩阵
-//     // splat2world矩阵 将 Gaussians 的中心从局部坐标转换为相机坐标。
-//     // 这里的splat2world对应论文中的H变换
-//     float4x3 splat2world = float4x3(
-//         L[0][0], L[0][1], p_orig.x,
-//         L[1][0], L[1][1], p_orig.y,
-//         L[2][0], L[2][1], p_orig.z,
-//         0.0, 0.0, 1.0
-//     );
-
-//     // world2ndc矩阵 将世界坐标转换为 NDC坐标
-//     // projmatrix已经是float4x4格式，直接使用
-//     // world2ndc*ndc2pix对应论文中的W变换
-//     float4x4 world2ndc = projmatrix;
-
-//     // 矩阵将 NDC坐标转换为像素坐标
-//     float4x3 ndc2pix = float4x3(
-//         float(W)/2.0, 0.0, 0.0,
-//         0.0, float(H)/2.0, 0.0,
-//         0.0, 0.0, 0.0,
-//         float(W-1)/2.0, float(H-1)/2.0, 1.0
-//     );
-
-//     // 计算传输矩阵 T
-//     T = mul(transpose(ndc2pix), mul(world2ndc, splat2world));
-    
-//     // 计算法线 normal
-//     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
-//     normal = mul(viewmatrix, float4(local_normal,0.0f)).xyz;
-// }
-
 [Differentiable]
 void compute_transmat(
     float3 p_orig,
@@ -467,11 +414,11 @@ void compute_transmat(
     // 计算世界坐标到 NDC 的矩阵
     // splat2world矩阵 将 Gaussians 的中心从局部坐标转换为相机坐标。
     // 这里的splat2world对应论文中的H变换
-    float4x4 splat2world = float4x4(
-        L[0][0], L[0][1], 0.0, p_orig.x,
-        L[1][0], L[1][1], 0.0, p_orig.y,
-        L[2][0], L[2][1], 0.0, p_orig.z,
-        0.0, 0.0, 0.0, 1.0
+    float4x3 splat2world = float4x3(
+        L[0][0], L[0][1], p_orig.x,
+        L[1][0], L[1][1], p_orig.y,
+        L[2][0], L[2][1], p_orig.z,
+        0.0, 0.0, 1.0
     );
 
     // world2ndc矩阵 将世界坐标转换为 NDC坐标
@@ -480,21 +427,74 @@ void compute_transmat(
     float4x4 world2ndc = projmatrix;
 
     // 矩阵将 NDC坐标转换为像素坐标
-    float4x4 ndc2pix = float4x4(
-        float(W) / 2.0, 0.0, 0.0, float(W - 1) / 2.0,
-        0.0, float(H) / 2.0, 0.0, float(H - 1) / 2.0,
-        0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0
+    float4x3 ndc2pix = float4x3(
+        float(W)/2.0, 0.0, 0.0,
+        0.0, float(H)/2.0, 0.0,
+        0.0, 0.0, 0.0,
+        float(W-1)/2.0, float(H-1)/2.0, 1.0
     );
 
-    const float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
-    T[0] = temp[0].xyw;
-    T[1] = temp[1].xyw;
-    T[2] = temp[3].xyw;
+    // 计算传输矩阵 T
+    T = mul(transpose(ndc2pix), mul(world2ndc, splat2world));
+    
     // 计算法线 normal
     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
-    normal = mul(viewmatrix, float4(local_normal, 0.0f)).xyz;
+    normal = mul(viewmatrix, float4(local_normal,0.0f)).xyz;
 }
+
+// [Differentiable]
+// void compute_transmat(
+//     float3 p_orig,
+//     float2 scale,
+//     float mod,
+//     float4 rot,
+//     float4x4 projmatrix,
+//     float4x4 viewmatrix,
+//     int W,
+//     int H,
+//     out float3x3 T,
+//     out float3 normal
+// ) {
+//     // rot转换为旋转矩阵R
+//     float3x3 R = quat_to_rotmat(rot);
+
+//     // 函数将缩放向量 `scale` 和缩放因子 `mod` 转换为缩放矩阵 `S`
+//     float3x3 S = scale_to_mat(scale, mod);
+
+//     // 计算变换矩阵 `L`
+//     float3x3 L = mul(R, S);
+
+//     // 计算世界坐标到 NDC 的矩阵
+//     // splat2world矩阵 将 Gaussians 的中心从局部坐标转换为相机坐标。
+//     // 这里的splat2world对应论文中的H变换
+//     float4x4 splat2world = float4x4(
+//         L[0][0], L[0][1], 0.0, p_orig.x,
+//         L[1][0], L[1][1], 0.0, p_orig.y,
+//         L[2][0], L[2][1], 0.0, p_orig.z,
+//         0.0, 0.0, 0.0, 1.0
+//     );
+
+//     // world2ndc矩阵 将世界坐标转换为 NDC坐标
+//     // projmatrix已经是float4x4格式，直接使用
+//     // world2ndc*ndc2pix对应论文中的W变换
+//     float4x4 world2ndc = projmatrix;
+
+//     // 矩阵将 NDC坐标转换为像素坐标
+//     float4x4 ndc2pix = float4x4(
+//         float(W) / 2.0, 0.0, 0.0, float(W - 1) / 2.0,
+//         0.0, float(H) / 2.0, 0.0, float(H - 1) / 2.0,
+//         0.0, 0.0, 0.0, 0.0,
+//         0.0, 0.0, 0.0, 1.0
+//     );
+
+//     const float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
+//     T[0] = temp[0].xyw;
+//     T[1] = temp[1].xyw;
+//     T[2] = temp[3].xyw;
+//     // 计算法线 normal
+//     float3 local_normal = float3(L[0][2], L[1][2], L[2][2]);
+//     normal = mul(viewmatrix, float4(local_normal, 0.0f)).xyz;
+// }
 
 // --------------------------------------------------------------------------------------------------------------------
 // 该代码计算 2D 高斯分布的边界框和中心，并将中心用于创建低通滤波器

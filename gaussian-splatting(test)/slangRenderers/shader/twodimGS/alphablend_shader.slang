@@ -65,7 +65,8 @@ float4 alpha_blend(TensorView<int32_t> sorted_gauss_idx,
             collected_normalopacity_Tuvw[thread_rank] = load_splat_alphablend_2(coll_id, normal_opacity, transMats);
         }
         AllMemoryBarrierWithGroupSync();
-        if (thread_active) {            for (int j = 0; j < min(block_size, splats_left_to_process); j++)
+        if (thread_active) {            
+            for (int j = 0; j < min(block_size, splats_left_to_process); j++)
             {
                 local_n_contrib++;
                 // First compute two homogeneous planes, See Eq. (8)
@@ -145,7 +146,8 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
     {
         // Collectively fetch per-Gaussian data from global to shared
         AllMemoryBarrierWithGroupSync();
-        int progress = i * block_size + thread_rank;        if (tile_idx_start + progress < tile_idx_end)
+        int progress = i * block_size + thread_rank;        
+        if (tile_idx_start + progress < tile_idx_end)
         {
             uint32_t coll_id = uint32_t(sorted_gauss_idx[tile_idx_end - progress - 1]);
             collected_idx[thread_rank] = coll_id;
@@ -188,7 +190,7 @@ void bwd_alpha_blend(TensorView<int32_t> sorted_gauss_idx,
                 bwd_diff(update_pixel_state)(dp_current_pixel_state, dp_gauss_rgba, d_current_pixel_state);
                 d_current_pixel_state = dp_current_pixel_state.getDifferential();
                 bwd_diff(evaluate_splat_2dgs)(dp_g, dp_center_pix_coord, H, W, dp_Tu, dp_Tv, dp_Tw, dp_normal_opacity_val, dp_gauss_rgba.d);
-                bwd_diff(load_splat_alphablend)(g_idx, xyz_vs, inv_cov_vs, opacity, rgb, dp_g.d);
+                //bwd_diff(load_splat_alphablend)(g_idx, xyz_vs, inv_cov_vs, opacity, rgb, dp_g.d);
 
                 // Propagate gradients through load_splat_alphablend_2
                 Splat_2D_NormalOpacity_UVW d_trans_data = {};
