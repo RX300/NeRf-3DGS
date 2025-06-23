@@ -199,10 +199,12 @@ struct Splat_2D_Vertex : IDifferentiable
 
 struct Splat_2D_NormalOpacity_UVW : IDifferentiable
 {
+    float2 point_ndc;
     float3 TU;
     float3 TV;
     float3 TW;
     float4 normal_opacity; // normal in world space, opacity
+    float3 rgb; // RGB color of the splat
 };
 
 float splat_radius(float2x2 cov_vs, float det) {
@@ -271,24 +273,42 @@ Splat_2D_AlphaBlend load_splat_alphablend(int32_t g_idx,
 
 [Differentiable]
 Splat_2D_NormalOpacity_UVW load_splat_alphablend_2(int32_t g_idx,
-                                                   DiffTensorView normal_opacity,
-                                                   DiffTensorView transMats)
+                                                DiffTensorView xyz_ndc,
+                                                DiffTensorView normal_opacity,
+                                                DiffTensorView transMats,
+                                                DiffTensorView rgb)
 {
+    // Load point in NDC space
+    float2 g_point_ndc = float2(xyz_ndc[uint2(g_idx, 0)],
+                                xyz_ndc[uint2(g_idx, 1)]);
     // Load normal and opacity (4 components: normal.xyz + opacity)
     float4 g_normal_opacity = read_t4_float4(g_idx, normal_opacity);
+    // float3 g_Tu = float3(transMats[9 * g_idx + 0],
+    //                      transMats[9 * g_idx + 1],
+    //                      transMats[9 * g_idx + 2]);
+
+    // float3 g_Tv = float3(transMats[9 * g_idx + 3],
+    //                      transMats[9 * g_idx + 4],
+    //                      transMats[9 * g_idx + 5]);
+
+    // float3 g_Tw = float3(transMats[9 * g_idx + 6],
+    //                      transMats[9 * g_idx + 7],
+    //                      transMats[9 * g_idx + 8]);
+
     float3 g_Tu = float3(transMats[9 * g_idx + 0],
-                         transMats[9 * g_idx + 1],
-                         transMats[9 * g_idx + 2]);
+                         transMats[9 * g_idx + 3],
+                         transMats[9 * g_idx + 6]);
 
-    float3 g_Tv = float3(transMats[9 * g_idx + 3],
+    float3 g_Tv = float3(transMats[9 * g_idx + 1],
                          transMats[9 * g_idx + 4],
-                         transMats[9 * g_idx + 5]);
+                         transMats[9 * g_idx + 7]);
 
-    float3 g_Tw = float3(transMats[9 * g_idx + 6],
-                         transMats[9 * g_idx + 7],
+    float3 g_Tw = float3(transMats[9 * g_idx + 2],
+                         transMats[9 * g_idx + 5],
                          transMats[9 * g_idx + 8]);
-
-    return { g_Tu, g_Tv, g_Tw, g_normal_opacity };
+    // Load RGB color
+    float3 g_rgb = read_t3_float3(g_idx, rgb);
+    return { g_point_ndc, g_Tu, g_Tv, g_Tw, g_normal_opacity, g_rgb };
 }
 
 [Differentiable]
@@ -314,41 +334,46 @@ float4 evaluate_splat(Splat_2D_AlphaBlend g,
 }
 
 [Differentiable]
-float4 evaluate_splat_2dgs(Splat_2D_AlphaBlend g,
+float4 evaluate_splat_2dgs(Splat_2D_NormalOpacity_UVW splat,
                            float2 pix_coord,
                            uint32_t H,
-                           uint32_t W,
-                           const float3 Tu,
-                           const float3 Tv,
-                           const float3 Tw,
-                           const float4 normal_opacity)
+                           uint32_t W)
 {
-    // Fisrt compute two homogeneous planes, See Eq. (8)
+    // 从结构体中提取参数
+    float2 xy_ndc = splat.point_ndc;
+    float3 Tu = splat.TU;
+    float3 Tv = splat.TV;
+    float3 Tw = splat.TW;
+    float4 normal_opacity = splat.normal_opacity;
+    float3 g_rgb = splat.rgb;
+
+    // First compute two homogeneous planes, See Eq. (8)
     // Transform the two planes into local u-v system.
-    float3 k = (float)pix_coord.x * Tw - Tu;
-    float3 l = (float)pix_coord.y * Tw - Tv;
+    float3 k = pix_coord.x * Tw - Tu;
+    float3 l = pix_coord.y * Tw - Tv;
     // Cross product of two planes is a line, Eq. (9)
     float3 p = cross(k, l);
-    if (p.z == 0.0) 
+    if (p.z == 0.0)
         return float4(0.0f, 0.0f, 0.0f, 0.0f); // 主要是让最后一个分量为0，跳过这个高斯的计算
     // Perspective division to get the intersection (u,v), Eq. (10)
     float2 s = { p.x / p.z, p.y / p.z };
     float rho3d = (s.x * s.x + s.y * s.y);
     // Add low pass filter
-    float2 d = { g.xyz_vs.x - (float)pix_coord.x, g.xyz_vs.y - (float)pix_coord.y };
+    float2 d = { xy_ndc.x - pix_coord.x, xy_ndc.y - pix_coord.y };
     const float FilterInvSquare = 2.0f;
     float rho2d = FilterInvSquare * (d.x * d.x + d.y * d.y);
     float rho = min(rho3d, rho2d);
     // compute intersection and depth
-    float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z;
-    if (depth < 0.2f)
-        return float4(0.0f, 0.0f, 0.0f, 0.0f); // 主要是让最后一个分量为0，跳过这个高斯的计算
+    // float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z;
+    float depth = (s.x * Tw.x + s.y * Tw.y) + Tw.z;
+    // if (depth < 0.2f)
+    //     return float4(0.0f, 0.0f, 0.0f, 0.0f); // 主要是让最后一个分量为0，跳过这个高斯的计算
     float4 nor_o = normal_opacity;
     float normal[3] = { nor_o.x, nor_o.y, nor_o.z };
     float opa = nor_o.w;
     float power = -0.5f * rho;
     float alpha = min(0.99f, opa * exp(power));
-    float3 premult_rgb = g.rgb * alpha;
+    float3 premult_rgb = g_rgb * alpha;
     return float4(premult_rgb, alpha);
 }
 
@@ -488,10 +513,13 @@ void compute_transmat(
     );
 
     float4x4 temp = mul(ndc2pix, mul(world2ndc, splat2world));
-    //float4x4 temp = mul(splat2world, mul(world2ndc, ndc2pix));
-    T = float3x3(temp[0][0], temp[0][1], temp[0][3],
-                 temp[1][0], temp[1][1], temp[1][3],
-                 temp[3][0], temp[3][1], temp[3][3]);
+    // float4x4 temp = mul(splat2world, mul(world2ndc, ndc2pix));
+    //  T = float3x3(temp[0][0], temp[0][1], temp[0][3],
+    //               temp[1][0], temp[1][1], temp[1][3],
+    //               temp[3][0], temp[3][1], temp[3][3]);
+    T = float3x3(temp[0][0], temp[1][0], temp[3][0],
+                 temp[0][1], temp[1][1], temp[3][1],
+                 temp[0][3], temp[1][3], temp[3][3]);
     // T[0] = temp[0].xyw;
     // T[1] = temp[1].xyw;
     // T[2] = temp[3].xyw;

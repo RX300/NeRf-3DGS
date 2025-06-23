@@ -40,7 +40,7 @@ void vertex_shader(DiffTensorView xyz_ws,
                    TensorView<int32_t> out_tiles_touched,
                    TensorView<int32_t> out_rect_tile_space,
                    TensorView<int32_t> out_radii,
-                   TensorView<float> out_transMat,
+                   DiffTensorView out_transMat,
                    DiffTensorView out_xyz_vs,
                    DiffTensorView out_inv_cov_vs,
                    DiffTensorView out_rgb,
@@ -118,8 +118,8 @@ void vertex_shader(DiffTensorView xyz_ws,
     out_rect_tile_space[uint2(g_idx, 2)] = rect_tile_space.max_x;
     out_rect_tile_space[uint2(g_idx, 3)] = rect_tile_space.max_y;
 
-    out_xyz_vs.storeOnce(uint2(g_idx, 0), splat.xyz_vs.x);
-    out_xyz_vs.storeOnce(uint2(g_idx, 1), splat.xyz_vs.y);
+    out_xyz_vs.storeOnce(uint2(g_idx, 0), point_image.x);
+    out_xyz_vs.storeOnce(uint2(g_idx, 1), point_image.y);
     out_xyz_vs.storeOnce(uint2(g_idx, 2), splat.xyz_vs.z);
     // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 0), g_inv_cov_vs[0][0]);
     // out_inv_cov_vs.storeOnce(uint3(g_idx, 0, 1), g_inv_cov_vs[0][1]);

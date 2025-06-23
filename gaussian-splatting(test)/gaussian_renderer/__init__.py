@@ -189,7 +189,8 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
     if not hasattr(render, 'renderer_type'):
         render.renderer_type = type(gs_renderer).__name__
         print(f"Using renderer type: {render.renderer_type}")
-    
+    if not hasattr(render, 'render_count'):
+        render.render_count = 0
     # Prepare inputs for GSRenderer
     means3D = pc.get_xyz
     rotations = pc.get_rotation
@@ -228,7 +229,13 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
         fovy=viewpoint_camera.FoVy,
         fovx=viewpoint_camera.FoVx
     ) # Output is (C, H, W)
-        
+    # 打印means3D,rotations,scales,opacity,sh_coeffs的梯度
+    if render.render_count%20 == 0:    
+        print("means3D grad:", means3D.grad)
+        print("rotations grad:", rotations.grad)
+        print("scales grad:", scales.grad)
+        print("opacity grad:", opacity.grad)
+        print("sh_coeffs grad:", sh_coeffs.grad)
     # Apply exposure to rendered image (training only)
     if use_trained_exp:
         exposure_data = pc.get_exposure_from_name(viewpoint_camera.image_name)
@@ -259,5 +266,5 @@ def render(viewpoint_camera:Camera, pc : GaussianModel, pipe, bg_color : torch.T
         "radii": radii,
         "depth" : dummy_depth_image
         }
-    
+    render.render_count += 1
     return out
